@@ -7,6 +7,7 @@ Supported email types:
 - indusind_cc_payment_alert: Credit card payment confirmation
 """
 import re
+from datetime import datetime
 
 from bs4 import BeautifulSoup
 
@@ -16,10 +17,27 @@ from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
 from bank_email_parser.utils import (
     extract_table_pairs,
     normalize_key,
-    normalize_whitespace,
     parse_amount,
     parse_date,
 )
+
+
+def _parse_indusind_datetime(date_str: str, time_str: str | None = None) -> datetime | None:
+    """Parse IndusInd date strings with optional 12-hour time."""
+    cleaned_date = date_str.strip()
+    if time_str is not None:
+        cleaned_time = time_str.strip().upper()
+        try:
+            return datetime.strptime(
+                f"{cleaned_date} {cleaned_time}",
+                "%d-%m-%Y %I:%M:%S %p",
+            )
+        except ValueError:
+            pass
+    try:
+        return datetime.strptime(cleaned_date, "%d-%m-%Y")
+    except ValueError:
+        return None
 
 
 class IndusindCcPaymentAlertParser(BaseEmailParser):
@@ -44,8 +62,7 @@ class IndusindCcPaymentAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse IndusInd CC payment alert.")
@@ -98,8 +115,7 @@ class IndusindCcTransactionAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse IndusInd CC transaction alert.")
@@ -107,7 +123,10 @@ class IndusindCcTransactionAlertParser(BaseEmailParser):
         if (amount := parse_amount(match.group("amount"))) is None:
             raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
 
-        transaction_date = parse_date(match.group("date"))
+        transaction_dt = _parse_indusind_datetime(
+            match.group("date"),
+            match.group("time"),
+        )
 
         balance = None
         if limit_match := self._limit_pattern.search(text):
@@ -120,7 +139,8 @@ class IndusindCcTransactionAlertParser(BaseEmailParser):
             transaction=TransactionAlert(
                 direction="debit",
                 amount=Money(amount=amount),
-                transaction_date=transaction_date,
+                transaction_date=transaction_dt.date() if transaction_dt else None,
+                transaction_time=transaction_dt.time() if transaction_dt else None,
                 counterparty=match.group("merchant").strip(),
                 balance=balance,
                 card_mask=match.group("card"),
@@ -177,8 +197,7 @@ class IndusindDcTransactionAlertParser(BaseEmailParser):
         return fields
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        soup, text = self.prepare_html(html)
 
         if not (intro_match := self._intro_pattern.search(text)):
             raise ParseError("Could not parse IndusInd DC transaction alert.")
@@ -193,9 +212,9 @@ class IndusindDcTransactionAlertParser(BaseEmailParser):
         if (amount := parse_amount(cleaned_amount)) is None:
             raise ParseError(f"Could not parse amount: {raw_amount!r}")
 
-        transaction_date = None
+        transaction_dt = None
         if date_str := table_data.get("date"):
-            transaction_date = parse_date(date_str)
+            transaction_dt = _parse_indusind_datetime(date_str, table_data.get("time"))
 
         counterparty = table_data.get("merchant")
 
@@ -210,7 +229,8 @@ class IndusindDcTransactionAlertParser(BaseEmailParser):
             transaction=TransactionAlert(
                 direction="debit",
                 amount=Money(amount=amount),
-                transaction_date=transaction_date,
+                transaction_date=transaction_dt.date() if transaction_dt else None,
+                transaction_time=transaction_dt.time() if transaction_dt else None,
                 counterparty=counterparty,
                 balance=balance,
                 card_mask=intro_match.group("card"),
@@ -245,8 +265,7 @@ class IndusindAccountAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse IndusInd account alert.")

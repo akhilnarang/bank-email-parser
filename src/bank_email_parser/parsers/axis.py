@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from bs4 import BeautifulSoup
 
-from bank_email_parser.exceptions import ParseError
+from bank_email_parser.exceptions import ParseError, ParserStubError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
 from bank_email_parser.utils import normalize_whitespace, parse_date
@@ -91,8 +91,7 @@ class AxisCcDebitAlertParser(BaseEmailParser):
     email_type = "axis_cc_debit_alert"
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-
+        soup, _ = self.prepare_html(html)
         fields = _extract_label_value_pairs(soup)
 
         if not (amount_raw := fields.get("amount")):
@@ -142,7 +141,7 @@ class AxisNeftAlertParser(BaseEmailParser):
     email_type = "axis_neft_alert"
 
     def parse(self, html: str) -> ParsedEmail:
-        raise NotImplementedError(
+        raise ParserStubError(
             "Axis NEFT alert parser not yet implemented -- "
             "need a sample email to determine the exact format."
         )

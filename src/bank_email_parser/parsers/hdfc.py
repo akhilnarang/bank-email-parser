@@ -5,6 +5,8 @@ Supported email types:
 - hdfc_card_debit_alert: Credit or debit card POS/online transaction
 - hdfc_reversal_alert: Card transaction reversal/refund
 - hdfc_cheque_clearing: Cheque clearing notification
+- hdfc_rupay_upi_debit: RuPay credit card UPI debit
+- hdfc_imps_alert: IMPS transfer alert
 """
 import re
 from datetime import datetime
@@ -77,8 +79,7 @@ class HdfcUpiAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if match := self._debit_pattern.search(text):
             direction = "debit"
@@ -135,8 +136,7 @@ class HdfcCardDebitAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse HDFC card debit alert.")
@@ -188,8 +188,7 @@ class HdfcReversalAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._amount_pattern.search(text)):
             raise ParseError("Could not parse HDFC reversal alert.")
@@ -249,8 +248,7 @@ class HdfcChequeClearingParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse HDFC cheque clearing alert.")
@@ -293,8 +291,7 @@ class HdfcRupayUpiDebitParser(BaseEmailParser):
     _ref_pattern = re.compile(r"reference\s+number\s+is\s+(?P<ref>[\d]+)")
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse HDFC RuPay UPI debit alert.")
@@ -344,8 +341,7 @@ class HdfcImpsAlertParser(BaseEmailParser):
     _ref_pattern = re.compile(r"IMPS\s+reference\s+number\s+is\s+(?P<ref>[\d]+)")
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse HDFC IMPS alert.")

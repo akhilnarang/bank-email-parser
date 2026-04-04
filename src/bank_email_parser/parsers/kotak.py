@@ -71,8 +71,7 @@ class KotakCardTransactionParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse Kotak card transaction.")
@@ -148,8 +147,7 @@ class KotakUpiPaymentParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse Kotak UPI payment.")
@@ -205,8 +203,7 @@ class KotakDigitalTransactionParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        soup, text = self.prepare_html(html)
 
         if not (match := self._amount_pattern.search(text)):
             raise ParseError("Could not parse Kotak digital transaction.")
@@ -264,8 +261,7 @@ class Kotak811TransactionParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._amount_pattern.search(text)):
             raise ParseError("Could not parse Kotak811 transaction.")
@@ -331,8 +327,7 @@ class KotakCcBillPaidParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not self._pattern.search(text):
             raise ParseError("Could not parse Kotak CC bill paid.")

@@ -4,14 +4,13 @@ Supported email types:
 - equitas_cc_alert: Credit card transaction (spend) alert
 """
 import re
+from datetime import datetime
 from decimal import Decimal
-
-from bs4 import BeautifulSoup
 
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
-from bank_email_parser.utils import normalize_whitespace, parse_date
+from bank_email_parser.utils import parse_date
 
 
 def _clean_amount(raw: str) -> Decimal:
@@ -45,8 +44,7 @@ class EquitasCcAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse Equitas credit card alert.")
@@ -56,6 +54,17 @@ class EquitasCcAlertParser(BaseEmailParser):
         card_mask = match.group("card")
         merchant = match.group("merchant").strip()
         transaction_date = parse_date(match.group("date"))
+        transaction_time = None
+        try:
+            transaction_dt = datetime.strptime(
+                f"{match.group('date')} {match.group('time').upper()}",
+                "%d-%m-%Y %I:%M:%S %p",
+            )
+        except ValueError:
+            transaction_dt = None
+        if transaction_dt is not None:
+            transaction_date = transaction_dt.date()
+            transaction_time = transaction_dt.time()
         balance = Money(
             amount=_clean_amount(match.group("balance")),
             currency="INR",
@@ -68,6 +77,7 @@ class EquitasCcAlertParser(BaseEmailParser):
                 direction="debit",
                 amount=Money(amount=amount, currency=currency),
                 transaction_date=transaction_date,
+                transaction_time=transaction_time,
                 counterparty=merchant,
                 balance=balance,
                 card_mask=card_mask,

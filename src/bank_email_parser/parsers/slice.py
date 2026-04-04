@@ -7,6 +7,7 @@ Supported email types:
 """
 import re
 from decimal import Decimal
+from decimal import InvalidOperation
 
 from bs4 import BeautifulSoup
 
@@ -37,7 +38,7 @@ def _clean_amount(raw: str) -> Decimal:
     """Strip commas and zero-width non-joiners from a regex-captured amount."""
     try:
         return Decimal(raw.replace(",", "").replace("\u200c", ""))
-    except Exception:
+    except InvalidOperation:
         raise ParseError(f"Could not parse amount: {raw!r}")
 
 
@@ -61,8 +62,7 @@ class SliceTransactionAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        soup, text = self.prepare_html(html)
 
         if not (match := self._body_pattern.search(text)):
             raise ParseError("Could not parse slice transaction alert body.")
@@ -139,8 +139,7 @@ class SliceTransferAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        soup, text = self.prepare_html(html)
 
         if not (match := self._body_pattern.search(text)):
             raise ParseError("Could not parse slice transfer alert body.")
@@ -199,8 +198,7 @@ class SliceCcPaymentAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse slice CC payment alert.")

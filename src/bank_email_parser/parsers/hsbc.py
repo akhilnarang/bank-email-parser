@@ -7,12 +7,10 @@ Supported email types:
 import re
 from datetime import datetime
 
-from bs4 import BeautifulSoup
-
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
-from bank_email_parser.utils import normalize_whitespace, parse_amount, parse_date
+from bank_email_parser.utils import parse_amount, parse_date
 
 
 class HsbcCcDebitAlertParser(BaseEmailParser):
@@ -35,8 +33,7 @@ class HsbcCcDebitAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse HSBC CC debit alert.")
@@ -48,14 +45,14 @@ class HsbcCcDebitAlertParser(BaseEmailParser):
         time_str = match.group("time")
         txn_date = None
         txn_time = None
-        for dt_str, fmt in (
-            (f"{date_str} {time_str}", "%d %b %Y %H:%M"),
-            (date_str, "%d %b %Y"),
+        for dt_str, fmt, has_time in (
+            (f"{date_str} {time_str}", "%d %b %Y %H:%M", True),
+            (date_str, "%d %b %Y", False),
         ):
             try:
                 dt = datetime.strptime(dt_str, fmt)
                 txn_date = dt.date()
-                txn_time = dt.time() if " " in fmt else None
+                txn_time = dt.time() if has_time else None
                 break
             except ValueError:
                 continue
@@ -94,8 +91,7 @@ class HsbcCcCreditAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
+        _, text = self.prepare_html(html)
 
         if not (match := self._pattern.search(text)):
             raise ParseError("Could not parse HSBC CC credit alert.")

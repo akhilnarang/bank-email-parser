@@ -5,9 +5,18 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
 
 # Virtual environments
 .venv
+
+# Local tool state and private email exports
+.codex
+.ropeproject/
+*.eml
+*.msg
+*.mbox
+*.pst
 
 # Some unsanitized test data
 data/

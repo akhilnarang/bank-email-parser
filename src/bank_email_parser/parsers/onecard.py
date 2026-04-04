@@ -41,8 +41,7 @@ class OnecardDebitAlertParser(BaseEmailParser):
     )
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
-        text = normalize_whitespace(soup.get_text(" ", strip=True))
+        _, text = self.prepare_html(html)
 
         # Extract card mask from intro line
         card_mask = None

@@ -31,7 +31,7 @@ class UboiDebitAlertParser(BaseEmailParser):
     }
 
     def parse(self, html: str) -> ParsedEmail:
-        soup = BeautifulSoup(html, "html.parser")
+        soup, _ = self.prepare_html(html)
 
         # Locate the <h3>Transaction Details:</h3> heading
         heading = None

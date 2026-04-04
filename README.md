@@ -8,7 +8,7 @@ Parse Indian bank transaction alert emails into structured data. Feed it the HTM
 |------|----|-------------|
 | Axis Bank | `axis` | Credit card debit alert; NEFT alert (stub) |
 | Equitas SFB | `equitas` | Credit card transaction alert |
-| HDFC Bank | `hdfc` | UPI debit/credit, card debit (CC & DC), reversal, cheque clearing |
+| HDFC Bank | `hdfc` | UPI debit/credit, card debit (CC & DC), reversal, cheque clearing, RuPay UPI debit, IMPS alert |
 | HSBC | `hsbc` | Credit card debit, credit card payment received |
 | ICICI Bank | `icici` | CC transaction, CC payment, bank transfer (IMPS/NEFT/RTGS), net banking, CC reversal (stub) |
 | IDFC FIRST | `idfc` | Account credit/debit (RTGS/NEFT/IMPS), credit card debit |
@@ -30,6 +30,8 @@ Parse Indian bank transaction alert emails into structured data. Feed it the HTM
 | `hdfc` | `hdfc_card_debit_alert` | CC or DC POS/online debit |
 | `hdfc` | `hdfc_reversal_alert` | Card transaction reversal/refund |
 | `hdfc` | `hdfc_cheque_clearing` | Cheque clearing notification |
+| `hdfc` | `hdfc_rupay_upi_debit` | RuPay credit card UPI debit |
+| `hdfc` | `hdfc_imps_alert` | Account IMPS transfer alert |
 | `hsbc` | `hsbc_cc_debit_alert` | CC purchase |
 | `hsbc` | `hsbc_cc_credit_alert` | CC payment received |
 | `icici` | `icici_cc_transaction_alert` | CC purchase (supports INR + foreign currency) |
@@ -91,13 +93,14 @@ class TransactionAlert(BaseModel):
     direction: Literal["debit", "credit"]
     amount: Money
     transaction_date: date | None
+    transaction_time: time | None
     counterparty: str | None
     balance: Money | None
     reference_number: str | None
     account_mask: str | None
     card_mask: str | None
     channel: str | None       # upi, neft, imps, rtgs, card, atm, netbanking, cheque, etc.
-    raw_description: str | None
+    raw_description: str | None  # debug-only; excluded from model_dump()/model_dump_json() by default
 
 class Money(BaseModel):
     amount: Decimal
