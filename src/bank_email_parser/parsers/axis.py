@@ -5,6 +5,7 @@ Supported email types:
 - axis_neft_alert: NEFT transfer alert (stub -- awaiting sample email)
 """
 import re
+from datetime import datetime
 from decimal import Decimal
 
 from bs4 import BeautifulSoup
@@ -102,10 +103,24 @@ class AxisCcDebitAlertParser(BaseEmailParser):
         amount = _parse_money(amount_raw)
 
         transaction_date = None
+        transaction_time = None
         if date_raw := fields.get("date_time"):
-            # Format: '28-12-2025, 19:08:29 IST' -- extract just the date portion
+            # Format: '28-12-2025, 19:08:29 IST'
             date_part = date_raw.split(",")[0].strip()
             transaction_date = parse_date(date_part)
+            # Extract the time portion after the comma, stripping timezone suffix
+            parts = date_raw.split(",", 1)
+            if len(parts) == 2:
+                time_part = parts[1].strip()
+                # Remove timezone suffix like 'IST'
+                time_part = re.sub(r"\s+[A-Z]{2,4}$", "", time_part).strip()
+                if time_part:
+                    for fmt in ("%H:%M:%S", "%H:%M"):
+                        try:
+                            transaction_time = datetime.strptime(time_part, fmt).time()
+                            break
+                        except ValueError:
+                            continue
 
         balance = None
         if balance_raw := fields.get("balance"):
@@ -118,6 +133,7 @@ class AxisCcDebitAlertParser(BaseEmailParser):
                 direction="debit",
                 amount=amount,
                 transaction_date=transaction_date,
+                transaction_time=transaction_time,
                 counterparty=fields.get("merchant"),
                 balance=balance,
                 card_mask=fields.get("card_mask"),

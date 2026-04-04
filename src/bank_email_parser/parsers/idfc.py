@@ -7,12 +7,10 @@ Supported email types:
 import re
 from datetime import datetime
 
-from bs4 import BeautifulSoup
-
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
-from bank_email_parser.utils import normalize_whitespace, parse_amount, parse_date
+from bank_email_parser.utils import parse_amount
 
 
 def _parse_idfc_date(date_str: str) -> datetime | None:
@@ -21,8 +19,18 @@ def _parse_idfc_date(date_str: str) -> datetime | None:
     Handles:
       - '29-08-2025 20:37:48' (DD-MM-YYYY HH:MM:SS)
       - '16 MAR 2026' (DD MMM YYYY, uppercase month)
+
+    Normalizes month abbreviations to title case before parsing so that
+    uppercase months like 'MAR' work on strict-locale platforms where
+    ``strptime %b`` expects 'Mar'.
     """
     cleaned = date_str.strip()
+    # Normalize uppercase month abbreviations (e.g. "16 MAR 2026" -> "16 Mar 2026")
+    # so that %b works correctly on strict locale platforms.
+    parts = cleaned.split()
+    if len(parts) >= 2 and parts[1].isalpha():
+        parts[1] = parts[1].title()
+        cleaned = " ".join(parts)
     for fmt in ("%d-%m-%Y %H:%M:%S", "%d-%m-%Y", "%d %b %Y"):
         try:
             return datetime.strptime(cleaned, fmt)
@@ -72,7 +80,6 @@ class IdfcAccountAlertParser(BaseEmailParser):
         # Intentionally tolerating None here: date format changes shouldn't
         # block the entire parse.  transaction_date will be None downstream.
         txn_dt = _parse_idfc_date(date_time_str)
-        _idfc_has_time = match.group("time") is not None
 
         balance = None
         if bal_match := self._balance_pattern.search(text):
@@ -86,7 +93,7 @@ class IdfcAccountAlertParser(BaseEmailParser):
                 direction=direction,
                 amount=Money(amount=amount),
                 transaction_date=txn_dt.date() if txn_dt else None,
-                transaction_time=txn_dt.time() if txn_dt and _idfc_has_time else None,
+                transaction_time=txn_dt.time() if txn_dt else None,
                 counterparty=match.group("counterparty").strip(),
                 account_mask=match.group("account"),
                 reference_number=match.group("ref"),

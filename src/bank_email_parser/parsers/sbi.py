@@ -191,9 +191,9 @@ class SbiCcDeclinedParser(BaseEmailParser):
        Credit Card ending 5678 at merchant SAMPLE MERCHANT on date 15-01-26
        has been declined basis RBI guidelines.'
 
-    These are informational (no funds moved) but we record them as
-    direction='debit' with the attempted amount so the transaction is
-    visible in reporting.
+    These are informational -- no funds actually moved.  Recorded as
+    direction='declined' so downstream consumers can distinguish them
+    from actual debits/credits.
     """
 
     bank = "sbi"
@@ -235,7 +235,7 @@ class SbiCcDeclinedParser(BaseEmailParser):
             email_type=self.email_type,
             bank=self.bank,
             transaction=TransactionAlert(
-                direction="debit",
+                direction="declined",
                 amount=Money(amount=amount, currency=currency),
                 transaction_date=txn_date,
                 counterparty=match.group(5).strip(),
@@ -261,14 +261,14 @@ class SbiPaymentAckParser(BaseEmailParser):
     _date_pattern = re.compile(r"Payment\s+Date\s*:\s*(\d{1,2}\w*\s+\w+\s+\d{4})")
     _ref_pattern = re.compile(r"Transaction\s+Identification\s+Number\s*:\s*(\S+)")
 
-    _sup_tag = re.compile(r"<sup>.*?</sup>")
     _ordinal_suffix = re.compile(r"(\d+)(?:st|nd|rd|th)\b")
 
     def parse(self, html: str) -> ParsedEmail:
-        # Strip <sup>...</sup> tags AND their contents before parsing with
-        # BeautifulSoup, so '18<sup>th</sup>' becomes '18' in plain text.
-        cleaned_html = self._sup_tag.sub("", html)
-        soup = BeautifulSoup(cleaned_html, "html.parser")
+        # Remove <sup> tags (and their contents) using BeautifulSoup's
+        # decompose() so '18<sup>th</sup>' becomes '18' in plain text.
+        soup = BeautifulSoup(html, "html.parser")
+        for sup in soup.find_all("sup"):
+            sup.decompose()
         text = normalize_whitespace(soup.get_text(separator=" ", strip=True))
 
         if not (card_match := self._card_pattern.search(text)):

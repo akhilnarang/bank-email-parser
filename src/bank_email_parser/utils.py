@@ -35,16 +35,29 @@ def normalize_key(raw: str) -> str:
 
 
 def parse_date(date_str: str) -> date | None:
-    """Try common Indian bank date formats. Returns None on failure."""
+    """Try common Indian bank date formats. Returns None on failure.
+
+    Normalizes month names to title case before parsing so that
+    uppercase abbreviations like 'MAR' work on strict-locale platforms
+    where ``strptime %b`` expects 'Mar'.
+    """
     from datetime import datetime
 
     cleaned = date_str.strip()
+    # Normalize uppercase/lowercase month names to title case for %b/%B formats
+    # E.g. "19-MAR-26" -> "19-Mar-26", "07 FEB 2026" -> "07 Feb 2026"
+    normalized = _normalize_month_case(cleaned)
     for fmt in _DATE_FORMATS:
         try:
-            return datetime.strptime(cleaned, fmt).date()
+            return datetime.strptime(normalized, fmt).date()
         except ValueError:
             continue
     return None
+
+
+def _normalize_month_case(date_str: str) -> str:
+    """Title-case alphabetic tokens in a date string for strptime %b/%B compatibility."""
+    return re.sub(r"[A-Za-z]+", lambda m: m.group().title(), date_str)
 
 
 def parse_amount(raw: str) -> Decimal | None:

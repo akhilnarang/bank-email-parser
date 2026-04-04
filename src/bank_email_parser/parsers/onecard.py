@@ -6,12 +6,10 @@ Supported email types:
 import re
 from datetime import datetime
 
-from bs4 import BeautifulSoup
-
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
-from bank_email_parser.utils import normalize_whitespace, parse_amount
+from bank_email_parser.utils import parse_amount
 
 
 class OnecardDebitAlertParser(BaseEmailParser):
@@ -75,12 +73,14 @@ class OnecardDebitAlertParser(BaseEmailParser):
         txn_date = None
         txn_time = None
         if date_str:
-            dt_str = f"{date_str} {time_str}".strip() if time_str else date_str
-            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
+            for dt_str, fmt, has_time in (
+                (f"{date_str} {time_str}", "%d/%m/%Y %H:%M:%S", True),
+                (date_str, "%d/%m/%Y", False),
+            ):
                 try:
                     dt = datetime.strptime(dt_str, fmt)
                     txn_date = dt.date()
-                    txn_time = dt.time() if " " in fmt else None
+                    txn_time = dt.time() if has_time else None
                     break
                 except ValueError:
                     continue

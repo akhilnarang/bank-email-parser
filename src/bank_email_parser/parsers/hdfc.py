@@ -11,12 +11,10 @@ Supported email types:
 import re
 from datetime import datetime
 
-from bs4 import BeautifulSoup
-
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
-from bank_email_parser.utils import normalize_whitespace, parse_amount, parse_date
+from bank_email_parser.utils import parse_amount, parse_date
 
 
 def _parse_hdfc_date(date_str: str) -> datetime | None:
@@ -198,14 +196,7 @@ class HdfcReversalAlertParser(BaseEmailParser):
 
         counterparty = None
         if m := self._merchant_pattern.search(text):
-            # HDFC sometimes prepends a stray 'A ' artifact to the merchant name.
-            # Only strip it if followed by an uppercase letter (the real merchant start),
-            # so legitimate names like "A Mart" are preserved.
-            raw_merchant = m.group("merchant").strip()
-            if raw_merchant.startswith("A ") and len(raw_merchant) > 2 and raw_merchant[2].isupper():
-                counterparty = raw_merchant[2:].strip()
-            else:
-                counterparty = raw_merchant
+            counterparty = m.group("merchant").strip()
 
         txn_date = None
         txn_time = None
