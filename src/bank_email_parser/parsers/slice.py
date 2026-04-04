@@ -9,14 +9,11 @@ import re
 from decimal import Decimal
 from decimal import InvalidOperation
 
-from bs4 import BeautifulSoup
-
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
 from bank_email_parser.utils import (
     extract_table_pairs,
-    normalize_whitespace,
     parse_date,
 )
 

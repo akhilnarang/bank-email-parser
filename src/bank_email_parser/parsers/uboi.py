@@ -4,8 +4,6 @@ Supported email types:
 - uboi_debit_alert: Account debit alert (IMPS/NEFT/RTGS), parsed from structured
   HTML with a 'Transaction Details' heading and a <ul><li> list.
 """
-from bs4 import BeautifulSoup
-
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
@@ -21,14 +19,6 @@ class UboiDebitAlertParser(BaseEmailParser):
 
     bank = "uboi"
     email_type = "uboi_debit_alert"
-
-    _FIELD_MAP = {
-        "Payee Name": "counterparty",
-        "Amount": "amount",
-        "Transfer Type": "channel",
-        "Bank Ref. No.": "reference",
-        "Debited From": "account_mask",
-    }
 
     def parse(self, html: str) -> ParsedEmail:
         soup, _ = self.prepare_html(html)

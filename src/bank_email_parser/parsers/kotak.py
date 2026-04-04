@@ -10,12 +10,10 @@ Supported email types:
 import re
 from datetime import datetime
 
-from bs4 import BeautifulSoup
-
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
-from bank_email_parser.utils import normalize_whitespace, parse_amount, parse_date
+from bank_email_parser.utils import parse_amount, parse_date
 
 
 def _parse_kotak_datetime(date_str: str, time_str: str | None = None) -> datetime | None:

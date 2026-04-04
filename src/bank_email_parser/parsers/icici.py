@@ -10,12 +10,10 @@ Supported email types:
 import re
 from datetime import datetime
 
-from bs4 import BeautifulSoup
-
 from bank_email_parser.exceptions import ParseError, ParserStubError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
-from bank_email_parser.utils import normalize_whitespace, parse_amount
+from bank_email_parser.utils import parse_amount
 
 
 def _resolve_currency(raw: str) -> str:
@@ -171,8 +169,6 @@ class IciciCcPaymentAlertParser(BaseEmailParser):
 
     @staticmethod
     def _parse_date(date_str: str):
-        from datetime import date as date_type
-
         for fmt in ("%d-%b-%Y", "%d-%b-%y", "%b %d, %Y", "%b %d,%Y", "%d/%m/%Y"):
             try:
                 return datetime.strptime(date_str.strip(), fmt).date()
