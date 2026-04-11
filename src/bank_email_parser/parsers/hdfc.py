@@ -8,6 +8,7 @@ Supported email types:
 - hdfc_rupay_upi_debit: RuPay credit card UPI debit
 - hdfc_imps_alert: IMPS transfer alert
 """
+
 import re
 from datetime import datetime
 
@@ -305,7 +306,9 @@ class HdfcRupayUpiDebitParser(BaseEmailParser):
                 direction="debit",
                 amount=Money(amount=amount),
                 transaction_date=parse_date(match.group("date")),
-                counterparty=(match.group("counterparty") or match.group("vpa")).strip(),
+                counterparty=(
+                    match.group("counterparty") or match.group("vpa")
+                ).strip(),
                 card_mask=match.group("card"),
                 reference_number=reference_number,
                 channel="upi",

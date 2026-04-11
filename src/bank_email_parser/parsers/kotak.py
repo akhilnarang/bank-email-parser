@@ -1,12 +1,18 @@
 """Kotak Bank email parsers.
 
 Supported email types:
+- kotak_cc_transaction: Credit card spend alert ("INR X spent at MERCHANT")
 - kotak_card_transaction: Debit card POS transaction alert
 - kotak_upi_payment: Kotak811 UPI payment confirmation
+- kotak_upi_reversal: UPI transaction reversal credit
+- kotak_imps_credit: IMPS incoming credit
+- kotak_neft_credit: NEFT incoming credit
+- kotak_nach_debit: NACH/ECS mandate debit
 - kotak_digital_transaction: Kotak811 digital transaction (minimal data)
 - kotak811_transaction: Kotak811 app transaction (from no-reply@kotak.com)
 - kotak_cc_bill_paid: Credit card bill payment confirmation (Kotak811 paying another bank's CC)
 """
+
 import re
 from datetime import datetime
 
@@ -16,20 +22,88 @@ from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
 from bank_email_parser.utils import parse_amount, parse_date
 
 
-def _parse_kotak_datetime(date_str: str, time_str: str | None = None) -> datetime | None:
-    """Parse Kotak date (DD/MM/YYYY) with optional time (HH:MM:SS)."""
+def _parse_kotak_datetime(
+    date_str: str, time_str: str | None = None
+) -> datetime | None:
+    """Parse Kotak date (DD/MM/YYYY or DD/MM/YY) with optional time (HH:MM:SS or HH:MM)."""
     cleaned = date_str.strip()
     if time_str:
         combined = f"{cleaned} {time_str.strip()}"
-        try:
-            return datetime.strptime(combined, "%d/%m/%Y %H:%M:%S")
-        except ValueError:
-            pass
+        for fmt in (
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M",
+            "%d/%m/%y %H:%M:%S",
+            "%d/%m/%y %H:%M",
+        ):
+            try:
+                return datetime.strptime(combined, fmt)
+            except ValueError:
+                continue
     # Date-only fallback
-    try:
-        return datetime.strptime(cleaned, "%d/%m/%Y")
-    except ValueError:
-        return None
+    for fmt in ("%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(cleaned, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+class KotakCcTransactionParser(BaseEmailParser):
+    """Kotak Bank credit card spend alert.
+
+    Matches:
+      'INR 58 spent at Blinkit on 09/04/26 at 09:01:05 using your
+       Kotak Credit Card x5544. Your available credit limit is INR 50000.5.'
+    """
+
+    bank = "kotak"
+    email_type = "kotak_cc_transaction"
+
+    _pattern = re.compile(
+        r"(?:Rs\.?|₹|INR)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"spent\s+(?:at|on)\s+(?P<merchant>.+?)\s+"
+        r"on\s+(?P<date>\d{2}/\d{2}/\d{2,4})\s+"
+        r"at\s+(?P<time>\d{2}:\d{2}:\d{2})\s+"
+        r"using\s+your\s+Kotak\s+(?P<card_type>Credit|Debit)\s+Card\s+(?P<card>\w+)",
+        re.IGNORECASE,
+    )
+
+    _credit_limit_pattern = re.compile(
+        r"available\s+credit\s+limit\s+is\s+(?:Rs\.?|₹|INR)\s*(?P<limit>[\d,]+(?:\.\d+)?)",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse Kotak CC transaction.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        txn_dt = _parse_kotak_datetime(match.group("date"), match.group("time"))
+
+        balance = None
+        if lim_match := self._credit_limit_pattern.search(text):
+            if (lim_amount := parse_amount(lim_match.group("limit"))) is not None:
+                balance = Money(amount=lim_amount)
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                transaction_date=txn_dt.date() if txn_dt else None,
+                transaction_time=txn_dt.time() if txn_dt else None,
+                counterparty=match.group("merchant").strip(),
+                card_mask=match.group("card"),
+                balance=balance,
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
+        )
 
 
 class KotakCardTransactionParser(BaseEmailParser):
@@ -50,7 +124,7 @@ class KotakCardTransactionParser(BaseEmailParser):
 
     _pattern = re.compile(
         r"Your\s+transaction\s+of\s+(?:Rs\.?|₹|INR)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
-        r"at\s+(?P<merchant>.+?)\s+"
+        r"(?:at|on)\s+(?P<merchant>.+?)\s+"
         r"using\s+Kotak\s+Bank\s+(?P<card_type>Debit|Credit)\s+Card\s+(?P<card>\w+)\s+"
         r"on\s+(?P<date>\d{2}/\d{2}/\d{4})\s+(?P<time>\d{2}:\d{2}:\d{2})\s+"
         r"from\s+your\s+account\s+(?P<account>\w+)\s+"
@@ -177,6 +251,285 @@ class KotakUpiPaymentParser(BaseEmailParser):
                 reference_number=reference_number,
                 channel="upi",
                 raw_description=raw_desc,
+            ),
+        )
+
+
+class KotakUpiReversalParser(BaseEmailParser):
+    """Kotak Bank UPI transaction reversal credit.
+
+    Matches:
+      'Rs. 300.00 is credited to your Kotak Bank Account XXXXXX5678
+       for reversal of UPI transaction NA-a1b2c3d4-e5f6-7890-abcd-ef0123456789'
+    """
+
+    bank = "kotak"
+    email_type = "kotak_upi_reversal"
+
+    _pattern = re.compile(
+        r"(?:Rs\.?|₹|INR)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"is\s+credited\s+to\s+your\s+Kotak\s+Bank\s+Account\s+(?P<account>\w+)\s+"
+        r"for\s+reversal\s+of\s+UPI\s+transaction\s+(?P<ref>[\w-]+)",
+        re.IGNORECASE,
+    )
+
+    _date_pattern = re.compile(
+        r"sent\s+by\s+the\s+System\s*:\s*(?P<date>\d{2}/\d{2}/\d{2})\s+(?P<time>\d{2}:\d{2})",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse Kotak UPI reversal.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        txn_date = None
+        txn_time = None
+        if date_match := self._date_pattern.search(text):
+            parsed = _parse_kotak_datetime(
+                date_match.group("date"), date_match.group("time")
+            )
+            if parsed:
+                txn_date = parsed.date()
+                txn_time = parsed.time()
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                transaction_time=txn_time,
+                account_mask=match.group("account"),
+                reference_number=match.group("ref"),
+                channel="upi",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
+class KotakImpsCreditParser(BaseEmailParser):
+    """Kotak Bank IMPS incoming credit.
+
+    Matches:
+      'your account xx3782 is credited by Rs. 50000.00 on 12-Apr-2026
+       for IMPS transaction'
+      Followed by optional details: Sender Name, IMPS Reference No, etc.
+    """
+
+    bank = "kotak"
+    email_type = "kotak_imps_credit"
+
+    _pattern = re.compile(
+        r"your\s+account\s+"
+        r"(?P<account>\w+\s*\d{4})"
+        r"\s+is\s+credited\s+by\s+"
+        r"(?:Rs\.?\s*|INR\s*)(?P<amount>[\d,]+(?:\.\d+)?)"
+        r"\s+on\s+"
+        r"(?P<date>\d{1,2}-[A-Za-z]{3}-\d{2,4})"
+        r"\s+for\s+IMPS\s+transaction",
+        re.IGNORECASE,
+    )
+
+    _sender_pattern = re.compile(
+        r"Sender\s+Name\s*:\s*(?P<sender>.+?)(?:\s*Sender\s+Mobile|\s*$)",
+        re.IGNORECASE,
+    )
+    _imps_ref_pattern = re.compile(
+        r"IMPS\s+Reference\s+No\s*:\s*(?P<ref>\d+)",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse Kotak IMPS credit.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        txn_date = parse_date(match.group("date"))
+
+        counterparty = None
+        if sender_match := self._sender_pattern.search(text):
+            counterparty = sender_match.group("sender").strip()
+
+        reference_number = None
+        if ref_match := self._imps_ref_pattern.search(text):
+            reference_number = ref_match.group("ref")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                counterparty=counterparty,
+                reference_number=reference_number,
+                account_mask=match.group("account").strip(),
+                channel="imps",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
+class KotakNeftCreditParser(BaseEmailParser):
+    """Kotak Bank NEFT incoming credit.
+
+    Matches:
+      'Rs. 50000 has been credited to your Kotak Bank a/c XX5678
+       on 31-MAR-26 via NEFT transaction from Acme Corp.
+       Your Unique Transaction Reference Number (UTR) is: INDBH0000000001234'
+    """
+
+    bank = "kotak"
+    email_type = "kotak_neft_credit"
+
+    _pattern = re.compile(
+        r"(?:Rs\.?|₹|INR)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"has\s+been\s+credited\s+to\s+your\s+Kotak\s+Bank\s+a/c\s+(?P<account>\w+)\s+"
+        r"on\s+(?P<date>\d{1,2}-\w{3}-\d{2,4})\s+"
+        r"via\s+NEFT\s+transaction\s+from\s+(?P<sender>.+?)\.",
+        re.IGNORECASE,
+    )
+
+    _utr_pattern = re.compile(
+        r"Unique\s+Transaction\s+Reference\s+Number\s+\(UTR\)\s+is\s*:\s*(?P<utr>\S+)",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse Kotak NEFT credit.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        txn_date = parse_date(match.group("date"))
+
+        reference_number = None
+        if utr_match := self._utr_pattern.search(text):
+            reference_number = utr_match.group("utr")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                counterparty=match.group("sender").strip(),
+                account_mask=match.group("account"),
+                reference_number=reference_number,
+                channel="neft",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
+class KotakNachDebitParser(BaseEmailParser):
+    """Kotak Bank NACH/ECS mandate debit.
+
+    Matches:
+      'Your account XXXXXXXX5678 has been debited towards NACH/ECS transaction
+       Beneficiary: IDFC FIRST BANK
+       UMRN Number: KKBK0000000000123456
+       Amount: Rs.5,000.00
+       Transaction date : 03/04/2026'
+    """
+
+    bank = "kotak"
+    email_type = "kotak_nach_debit"
+
+    _pattern = re.compile(
+        r"Your\s+account\s+(?P<account>\w+)\s+has\s+been\s+debited\s+"
+        r"towards\s+NACH/ECS\s+transaction",
+        re.IGNORECASE,
+    )
+
+    _beneficiary_pattern = re.compile(
+        r"Beneficiary\s*:\s*(?P<beneficiary>.+?)(?:\s+UMRN\s+Number|\s+Amount\s*:|\s+Transaction\s+date)",
+        re.IGNORECASE,
+    )
+
+    _umrn_pattern = re.compile(
+        r"UMRN\s+Number\s*:\s*(?P<umrn>[\w-]+)",
+        re.IGNORECASE,
+    )
+
+    _amount_pattern = re.compile(
+        r"Amount\s*:\s*(?:Rs\.?|₹|INR)\s*(?P<amount>[\d,]+(?:\.\d+)?)",
+        re.IGNORECASE,
+    )
+
+    _date_pattern = re.compile(
+        r"Transaction\s+date\s*:\s*(?P<date>\d{2}/\d{2}/\d{4})",
+        re.IGNORECASE,
+    )
+
+    _footer_date_pattern = re.compile(
+        r"sent\s+by\s+the\s+System\s*:\s*(?P<date>\d{2}/\d{2}/\d{2})\s+(?P<time>\d{2}:\d{2})",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not self._pattern.search(text):
+            raise ParseError("Could not parse Kotak NACH debit.")
+
+        if not (amount_match := self._amount_pattern.search(text)):
+            raise ParseError("Could not find amount in Kotak NACH debit email.")
+
+        if (amount := parse_amount(amount_match.group("amount"))) is None:
+            raise ParseError(
+                f"Could not parse amount: {amount_match.group('amount')!r}"
+            )
+
+        account = self._pattern.search(text).group("account")
+
+        counterparty = None
+        if ben_match := self._beneficiary_pattern.search(text):
+            counterparty = ben_match.group("beneficiary").strip()
+
+        reference_number = None
+        if umrn_match := self._umrn_pattern.search(text):
+            reference_number = umrn_match.group("umrn")
+
+        txn_date = None
+        txn_time = None
+        if date_match := self._date_pattern.search(text):
+            txn_date = parse_date(date_match.group("date"))
+        elif footer_match := self._footer_date_pattern.search(text):
+            parsed = _parse_kotak_datetime(
+                footer_match.group("date"), footer_match.group("time")
+            )
+            if parsed:
+                txn_date = parsed.date()
+                txn_time = parsed.time()
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                transaction_time=txn_time,
+                counterparty=counterparty,
+                account_mask=account,
+                reference_number=reference_number,
+                channel="nach",
+                raw_description=self._pattern.search(text).group(0).strip(),
             ),
         )
 
@@ -334,7 +687,9 @@ class KotakCcBillPaidParser(BaseEmailParser):
             raise ParseError("Could not find bill amount in Kotak CC bill paid email.")
 
         if (amount := parse_amount(amount_match.group("amount"))) is None:
-            raise ParseError(f"Could not parse amount: {amount_match.group('amount')!r}")
+            raise ParseError(
+                f"Could not parse amount: {amount_match.group('amount')!r}"
+            )
 
         card_mask = None
         if card_match := self._card_pattern.search(text):
@@ -364,8 +719,13 @@ class KotakCcBillPaidParser(BaseEmailParser):
 
 
 _PARSERS = (
+    KotakCcTransactionParser(),
     KotakCardTransactionParser(),
     KotakUpiPaymentParser(),
+    KotakUpiReversalParser(),
+    KotakImpsCreditParser(),
+    KotakNeftCreditParser(),
+    KotakNachDebitParser(),
     KotakDigitalTransactionParser(),
     Kotak811TransactionParser(),
     KotakCcBillPaidParser(),
