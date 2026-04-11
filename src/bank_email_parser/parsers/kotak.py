@@ -5,6 +5,7 @@ Supported email types:
 - kotak_card_transaction: Debit card POS transaction alert
 - kotak_upi_payment: Kotak811 UPI payment confirmation
 - kotak_upi_reversal: UPI transaction reversal credit
+- kotak_imps_credit: IMPS incoming credit
 - kotak_neft_credit: NEFT incoming credit
 - kotak_nach_debit: NACH/ECS mandate debit
 - kotak_digital_transaction: Kotak811 digital transaction (minimal data)
@@ -307,6 +308,73 @@ class KotakUpiReversalParser(BaseEmailParser):
                 account_mask=match.group("account"),
                 reference_number=match.group("ref"),
                 channel="upi",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
+class KotakImpsCreditParser(BaseEmailParser):
+    """Kotak Bank IMPS incoming credit.
+
+    Matches:
+      'your account xx3782 is credited by Rs. 50000.00 on 12-Apr-2026
+       for IMPS transaction'
+      Followed by optional details: Sender Name, IMPS Reference No, etc.
+    """
+
+    bank = "kotak"
+    email_type = "kotak_imps_credit"
+
+    _pattern = re.compile(
+        r"your\s+account\s+"
+        r"(?P<account>\w+\s*\d{4})"
+        r"\s+is\s+credited\s+by\s+"
+        r"(?:Rs\.?\s*|INR\s*)(?P<amount>[\d,]+(?:\.\d+)?)"
+        r"\s+on\s+"
+        r"(?P<date>\d{1,2}-[A-Za-z]{3}-\d{2,4})"
+        r"\s+for\s+IMPS\s+transaction",
+        re.IGNORECASE,
+    )
+
+    _sender_pattern = re.compile(
+        r"Sender\s+Name\s*:\s*(?P<sender>.+?)(?:\s*Sender\s+Mobile|\s*$)",
+        re.IGNORECASE,
+    )
+    _imps_ref_pattern = re.compile(
+        r"IMPS\s+Reference\s+No\s*:\s*(?P<ref>\d+)",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse Kotak IMPS credit.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        txn_date = parse_date(match.group("date"))
+
+        counterparty = None
+        if sender_match := self._sender_pattern.search(text):
+            counterparty = sender_match.group("sender").strip()
+
+        reference_number = None
+        if ref_match := self._imps_ref_pattern.search(text):
+            reference_number = ref_match.group("ref")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                counterparty=counterparty,
+                reference_number=reference_number,
+                account_mask=match.group("account").strip(),
+                channel="imps",
                 raw_description=match.group(0).strip(),
             ),
         )
@@ -655,6 +723,7 @@ _PARSERS = (
     KotakCardTransactionParser(),
     KotakUpiPaymentParser(),
     KotakUpiReversalParser(),
+    KotakImpsCreditParser(),
     KotakNeftCreditParser(),
     KotakNachDebitParser(),
     KotakDigitalTransactionParser(),
