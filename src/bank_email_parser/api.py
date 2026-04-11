@@ -1,10 +1,25 @@
 """Public API: parse_email() entry point and SUPPORTED_BANKS registry."""
+
 from importlib import import_module
 
 from bank_email_parser.exceptions import ParseError, UnsupportedEmailTypeError
 from bank_email_parser.models import ParsedEmail
 
-SUPPORTED_BANKS = ("axis", "equitas", "hdfc", "hsbc", "icici", "idfc", "indusind", "kotak", "onecard", "sbi", "slice", "uboi")
+SUPPORTED_BANKS = (
+    "axis",
+    "bom",
+    "equitas",
+    "hdfc",
+    "hsbc",
+    "icici",
+    "idfc",
+    "indusind",
+    "kotak",
+    "onecard",
+    "sbi",
+    "slice",
+    "uboi",
+)
 
 
 def parse_email(bank: str, html: str) -> ParsedEmail:
@@ -30,9 +45,7 @@ def parse_email(bank: str, html: str) -> ParsedEmail:
         )
 
     if not isinstance(html, str):
-        raise ParseError(
-            f"Expected 'html' to be a string, got {type(html).__name__}"
-        )
+        raise ParseError(f"Expected 'html' to be a string, got {type(html).__name__}")
 
     bank = bank.strip().lower()
 
@@ -47,6 +60,8 @@ def parse_email(bank: str, html: str) -> ParsedEmail:
     module = import_module(f"bank_email_parser.parsers.{bank}")
 
     if not callable(parse := getattr(module, "parse", None)):
-        raise ParseError(f"bank_email_parser.parsers.{bank!r} does not define parse(html)")
+        raise ParseError(
+            f"bank_email_parser.parsers.{bank!r} does not define parse(html)"
+        )
 
     return parse(html)

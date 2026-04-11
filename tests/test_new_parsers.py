@@ -414,6 +414,70 @@ class TestAxisNeftStub:
             parse_email("axis", html)
 
 
+class TestBomUpiDebitAlertParser:
+    """Test Bank of Maharashtra UPI debit alert parser with synthetic HTML."""
+
+    SAMPLE_HTML = """
+    <html><body>
+    <p>Dear Customer,</p>
+    <p>Your A/c No xx 4521 debited by INR 2,500.00 on 15-JAN-2026
+    with UPI RRN :412356789012. A/c Bal is INR 12.50 CR and AVL Bal is INR 12.50 CR</p>
+    </body></html>
+    """
+
+    def test_parses_bom_upi_debit(self):
+        result = parse_email("bom", self.SAMPLE_HTML)
+        assert result.email_type == "bom_upi_debit_alert"
+        assert result.bank == "bom"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("2500.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.account_mask == "xx 4521"
+        assert result.transaction.channel == "upi"
+        assert result.transaction.reference_number == "412356789012"
+
+    def test_parses_date(self):
+        result = parse_email("bom", self.SAMPLE_HTML)
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 1
+        assert result.transaction.transaction_date.day == 15
+
+    def test_parses_balance(self):
+        result = parse_email("bom", self.SAMPLE_HTML)
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("12.50")
+
+    def test_parses_without_balance(self):
+        html = """
+        <html><body>
+        <p>Your A/c No XX7890 debited by INR 500.00 on 03-FEB-2026
+        with UPI RRN :998877665544.</p>
+        </body></html>
+        """
+        result = parse_email("bom", html)
+        assert result.email_type == "bom_upi_debit_alert"
+        assert result.transaction.amount.amount == Decimal("500.00")
+        assert result.transaction.balance is None
+        assert result.transaction.account_mask == "XX7890"
+
+    def test_parses_large_amount(self):
+        html = """
+        <html><body>
+        <p>Your A/c No xx 3456 debited by INR 1,00,000.00 on 28-MAR-2026
+        with UPI RRN :123456789012. A/c Bal is INR 0.13 CR and AVL Bal is INR 0.13 CR</p>
+        </body></html>
+        """
+        result = parse_email("bom", html)
+        assert result.transaction.amount.amount == Decimal("100000.00")
+        assert result.transaction.balance.amount == Decimal("0.13")
+
+    def test_rejects_non_bom_email(self):
+        html = "<html><body>Some random email</body></html>"
+        with pytest.raises(ParseError):
+            parse_email("bom", html)
+
+
 class TestKotakImpsCreditParser:
     """Test Kotak IMPS credit alert parser with synthetic HTML."""
 
