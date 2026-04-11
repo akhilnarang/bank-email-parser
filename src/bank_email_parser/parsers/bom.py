@@ -2,6 +2,7 @@
 
 Supported email types:
 - bom_upi_debit_alert: UPI debit alert ('Your A/c No xx XXXX debited by INR ... with UPI RRN')
+- bom_neft_credit_alert: NEFT credit alert ('Your A/c No XXXX has been credited by Rs. ... on DD-MMM-YYYY ... NEFT ...')
 """
 
 import re
@@ -73,7 +74,66 @@ class BomUpiDebitAlertParser(BaseEmailParser):
         )
 
 
-_PARSERS = (BomUpiDebitAlertParser(),)
+class BomNeftCreditAlertParser(BaseEmailParser):
+    """Bank of Maharashtra NEFT credit alert.
+
+    Matches:
+      'Your A/c No xxxx0967 has been credited by Rs. 10,000.00 on 28-MAR-2026
+       IBKL0000998 NEFT IBKLN22026032859927978 LIC02136P-LIC DO SAMBA.
+       A/c Bal is Rs. 10,363.13CR and AVL Bal is Rs.10,363.13'
+    """
+
+    bank = "bom"
+    email_type = "bom_neft_credit_alert"
+
+    _pattern = re.compile(
+        r"Your\s+A/c\s+No\s+" + _ACCT + r"\s+has\s+been\s+credited\s+by\s+"
+        r"(?:Rs\.?\s*)?(?P<amount>" + _AMT + r")"
+        r"\s+on\s+"
+        r"(?P<date>\d{1,2}-[A-Za-z]{3}-\d{2,4})"
+        r"\s+[A-Z0-9]+\s+NEFT\s+"
+        r"(?P<utr>\w+)"
+    )
+
+    # Optional balance extraction: "A/c Bal is Rs. 10,363.13CR and AVL Bal is Rs.10,363.13"
+    _balance_pattern = re.compile(
+        r"A/c\s+Bal\s+is\s+(?:Rs\.?\s*)(?P<balance>" + _AMT + r")\s*CR",
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        soup, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse Bank of Maharashtra NEFT credit alert.")
+
+        amount = parse_money(match.group("amount"))
+        if amount is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        transaction_date = parse_date(match.group("date"))
+
+        balance = None
+        if bal_match := self._balance_pattern.search(text):
+            if bal_amount := parse_money(bal_match.group("balance")):
+                balance = bal_amount
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=amount,
+                transaction_date=transaction_date,
+                reference_number=match.group("utr"),
+                account_mask=match.group("account").strip(),
+                balance=balance,
+                channel="neft",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
+_PARSERS = (BomUpiDebitAlertParser(), BomNeftCreditAlertParser())
 
 
 def parse(html: str) -> ParsedEmail:

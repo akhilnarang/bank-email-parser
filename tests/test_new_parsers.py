@@ -478,6 +478,67 @@ class TestBomUpiDebitAlertParser:
             parse_email("bom", html)
 
 
+class TestBomNeftCreditAlertParser:
+    """Test Bank of Maharashtra NEFT credit alert parser with synthetic HTML."""
+
+    SAMPLE_HTML = """
+    <html><body>
+    <p>Dear Customer,</p>
+    <p>Your A/c No xx1234 has been credited by Rs. 5,000.00 on 28-MAR-2026
+    SAMPLE0001 NEFT SAMPLE000000001 SENDER REF.
+    A/c Bal is Rs. 1,000.00CR and AVL Bal is Rs.1,000.00</p>
+    <p>Yours Faithfully,<br>Bank of Maharashtra</p>
+    </body></html>
+    """
+
+    def test_parses_bom_neft_credit(self):
+        result = parse_email("bom", self.SAMPLE_HTML)
+        assert result.email_type == "bom_neft_credit_alert"
+        assert result.bank == "bom"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("5000.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.account_mask == "xx1234"
+        assert result.transaction.channel == "neft"
+        assert result.transaction.reference_number == "SAMPLE000000001"
+
+    def test_parses_date(self):
+        result = parse_email("bom", self.SAMPLE_HTML)
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 3
+        assert result.transaction.transaction_date.day == 28
+
+    def test_parses_balance(self):
+        result = parse_email("bom", self.SAMPLE_HTML)
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("1000.00")
+
+    def test_parses_without_balance(self):
+        html = """
+        <html><body>
+        <p>Your A/c No xx5678 has been credited by Rs. 500.00 on 03-FEB-2026
+        OTHER00 NEFT OTHER000000001 SENDER NAME.</p>
+        </body></html>
+        """
+        result = parse_email("bom", html)
+        assert result.email_type == "bom_neft_credit_alert"
+        assert result.transaction.amount.amount == Decimal("500.00")
+        assert result.transaction.balance is None
+
+    def test_parses_large_amount(self):
+        html = """
+        <html><body>
+        <p>Your A/c No xx9999 has been credited by Rs. 1,50,000.00 on 15-JAN-2026
+        TEST0001 NEFT TEST000000001 BENEFICIARY REF.
+        A/c Bal is Rs. 2,00,000.00CR and AVL Bal is Rs.2,00,000.00</p>
+        </body></html>
+        """
+        result = parse_email("bom", html)
+        assert result.transaction.amount.amount == Decimal("150000.00")
+        assert result.transaction.reference_number == "TEST000000001"
+
+
 class TestKotakImpsCreditParser:
     """Test Kotak IMPS credit alert parser with synthetic HTML."""
 
