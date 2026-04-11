@@ -414,6 +414,74 @@ class TestAxisNeftStub:
             parse_email("axis", html)
 
 
+class TestKotakImpsCreditParser:
+    """Test Kotak IMPS credit alert parser with synthetic HTML."""
+
+    SAMPLE_HTML = """
+    <html><body>
+    <p>Dear Sample Customer,</p>
+    <p>We wish to inform you that your account xx4521 is credited by Rs. 25000.00
+    on 12-Apr-2026 for IMPS transaction.</p>
+    <p>Please find the details as below:<br>
+    Sender Name: Test Sender<br>
+    Sender Mobile No: 9190XX1234<br>
+    IMPS Reference No: 610202772071<br>
+    Remarks : Test Sender</p>
+    </body></html>
+    """
+
+    def test_parses_kotak_imps_credit(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.email_type == "kotak_imps_credit"
+        assert result.bank == "kotak"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("25000.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.account_mask == "xx4521"
+        assert result.transaction.channel == "imps"
+        assert result.transaction.reference_number == "610202772071"
+        assert result.transaction.counterparty == "Test Sender"
+
+    def test_parses_date(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 4
+        assert result.transaction.transaction_date.day == 12
+
+    def test_parses_with_inr_prefix(self):
+        html = """
+        <html><body>
+        <p>your account XX7890 is credited by INR 1500.00 on 05-Mar-2026 for IMPS transaction.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.email_type == "kotak_imps_credit"
+        assert result.transaction.amount.amount == Decimal("1500.00")
+        assert result.transaction.account_mask == "XX7890"
+
+    def test_parses_without_optional_fields(self):
+        html = """
+        <html><body>
+        <p>your account xx3456 is credited by Rs. 500.00 on 01-Jan-2026 for IMPS transaction.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.email_type == "kotak_imps_credit"
+        assert result.transaction.amount.amount == Decimal("500.00")
+        assert result.transaction.counterparty is None
+        assert result.transaction.reference_number is None
+
+    def test_parses_large_amount_with_commas(self):
+        html = """
+        <html><body>
+        <p>your account xx5678 is credited by Rs. 1,00,000.00 on 28-Feb-2026 for IMPS transaction.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction.amount.amount == Decimal("100000.00")
+
+
 class TestHdfcRupayUpiDebitParser:
     """Test HDFC RuPay credit card UPI debit alerts."""
 
