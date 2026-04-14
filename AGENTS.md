@@ -42,7 +42,6 @@ For a new email type on an existing bank, add a new `BaseEmailParser` subclass t
 ## Known stubs (raise `ParserStubError`)
 
 - `axis_neft_alert` — no sample email
-- `icici_cc_reversal` — no sample email
 
 These exist in `_PARSERS` so their `email_type` appears in error messages.
 

@@ -417,13 +417,55 @@ class TestKotakNachDebitParser:
         assert result.transaction.reference_number is None
 
 
-class TestIciciCcReversalStub:
-    """Test that the ICICI CC Reversal parser raises NotImplementedError."""
+class TestIciciCcReversalParser:
+    """Test ICICI CC merchant credit refund parser with synthetic HTML."""
 
-    def test_raises_not_implemented(self):
-        """The stub should raise ParseError (wrapping NotImplementedError)
-        when no other parser matches and reversal format is encountered."""
-        html = "<html><body>Reversal processed on your ICICI Bank Credit Card</body></html>"
+    SAMPLE_HTML = """
+    <html><body>
+    <table><tr><td>Dear Customer,</td><td>Jan 15, 2026</td></tr>
+    <tr><td>Greetings from ICICI Bank.<br><br>
+    We have received merchant credit refund on your ICICI Bank Credit Card XX1234
+    for INR 1,234.56 on January 14, 2026 from SAMPLE MERCHANT.<br><br>
+    We wish to inform you that this refund will not be considered as payment.
+    </td></tr></table>
+    </body></html>
+    """
+
+    def test_parses_cc_reversal(self):
+        result = parse_email("icici", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "icici_cc_reversal"
+        assert result.bank == "icici"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("1234.56")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.card_mask == "XX1234"
+        assert result.transaction.counterparty == "SAMPLE MERCHANT"
+        assert result.transaction.channel == "card"
+
+    def test_parses_date(self):
+        result = parse_email("icici", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 1
+        assert result.transaction.transaction_date.day == 14
+
+    def test_multiword_merchant_name(self):
+        html = """
+        <html><body>
+        We have received merchant credit refund on your ICICI Bank Credit Card XX0003
+        for INR 535 on December 19, 2022 from SAMPLE MULTI WORD MERCHANT.
+        </body></html>
+        """
+        result = parse_email("icici", html)
+        assert result.transaction is not None
+        assert result.transaction.counterparty == "SAMPLE MULTI WORD MERCHANT"
+        assert result.transaction.amount.amount == Decimal("535")
+        assert result.transaction.card_mask == "XX0003"
+
+    def test_non_matching_email_raises(self):
+        html = "<html><body>Some unrelated ICICI content</body></html>"
         with pytest.raises(ParseError):
             parse_email("icici", html)
 

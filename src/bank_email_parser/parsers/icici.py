@@ -6,12 +6,12 @@ Supported email types:
 - icici_cc_payment_alert: Credit card payment received
 - icici_bank_transfer_alert: Bank account IMPS/NEFT/RTGS transfer (debit)
 - icici_net_banking_alert: Net banking payment (debit)
-- icici_cc_reversal: Credit card reversal/refund (stub -- awaiting sample email)
+- icici_cc_reversal: Credit card merchant reversal/refund (credit back to card)
 """
 
 import re
 
-from bank_email_parser.exceptions import ParseError, ParserStubError
+from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BaseEmailParser, parse_with_parsers
 from bank_email_parser.utils import parse_amount, parse_date, parse_datetime
@@ -319,23 +319,48 @@ class IciciNetBankingAlertParser(BaseEmailParser):
 
 
 class IciciCcReversalParser(BaseEmailParser):
-    """ICICI credit card reversal/refund alert.
+    """ICICI credit card merchant reversal/refund alert.
 
-    From: credit_cards@icicibank.com
-    Subject: "Reversal processed on your ICICI Bank Credit Card XX1234"
-
-    TODO: No sample email available yet. Implement once a sample is obtained.
-    Expected pattern: reversal of <currency> <amount> on card <card_mask>
-    with transaction date and reference number.
+    Matches: 'We have received merchant credit refund on your ICICI Bank Credit Card
+    XXXX for <currency> <amount> on <date> from <merchant>.'
     """
 
     bank = "icici"
     email_type = "icici_cc_reversal"
 
+    _pattern = re.compile(
+        r"We\s+have\s+received\s+merchant\s+credit\s+refund\s+"
+        r"on\s+your\s+ICICI\s+Bank\s+Credit\s+Card\s+(?P<card>\w+)\s+"
+        rf"for\s+{_CUR}\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"on\s+(?P<date>(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s*\d{4})\s+"
+        r"from\s+(?P<counterparty>.+?)\.",
+    )
+
     def parse(self, html: str) -> ParsedEmail:
-        raise ParserStubError(
-            "ICICI CC reversal parser not yet implemented -- "
-            "need a sample email to determine the exact format."
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse ICICI CC reversal alert.")
+
+        currency = _resolve_currency(match.group("currency"))
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        transaction_date = parse_date(match.group("date"))
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount, currency=currency),
+                transaction_date=transaction_date,
+                counterparty=match.group("counterparty").strip(),
+                card_mask=match.group("card"),
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
         )
 
 
