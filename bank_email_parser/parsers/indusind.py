@@ -272,8 +272,25 @@ class IndusindAccountAlertParser(BaseEmailParser):
         )
         description = match.group("description").rstrip(".")
 
-        # Extract channel from description (e.g. "UPI/..." -> "upi")
         channel = description.split("/", 1)[0].lower() if "/" in description else None
+
+        reference_number = None
+        counterparty = None
+        if channel == "upi":
+            # UPI/<ref>/<DR|CR>/<vpa-prefix>/<bank>/<vpa>[/<extra>]
+            # The 4th segment is just the first 4 chars of the VPA; prefer the
+            # full VPA in segment 6 when present.
+            parts = [p.strip() for p in description.split("/")]
+            if len(parts) >= 2 and parts[1]:
+                reference_number = parts[1]
+            if len(parts) >= 6 and parts[5]:
+                counterparty = parts[5]
+            elif len(parts) >= 4 and parts[3]:
+                counterparty = parts[3]
+        else:
+            # Non-UPI alerts use a plain prose description (e.g. "Refund Frm
+            # Razorpay Payments", "NEFT/...", "Interest Credit"). Use it as-is.
+            counterparty = description or None
 
         balance = None
         if bal_match := self._balance_pattern.search(text):
@@ -286,7 +303,8 @@ class IndusindAccountAlertParser(BaseEmailParser):
             transaction=TransactionAlert(
                 direction=direction,
                 amount=Money(amount=amount),
-                counterparty="Payment received" if direction == "credit" else None,
+                counterparty=counterparty,
+                reference_number=reference_number,
                 balance=balance,
                 account_mask=match.group("account"),
                 channel=channel,
