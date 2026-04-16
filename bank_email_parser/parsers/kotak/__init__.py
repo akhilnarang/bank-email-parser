@@ -8,6 +8,7 @@ from bank_email_parser.parsers.base import BankParser
 
 from .accounts import KotakImpsCreditParser, KotakNachDebitParser, KotakNeftCreditParser
 from .cards import (
+    KotakCardRefundParser,
     KotakCardTransactionParser,
     KotakCcBillPaidParser,
     KotakCcTransactionParser,
@@ -19,6 +20,7 @@ from .upi import KotakUpiPaymentParser, KotakUpiReversalParser
 _PARSERS = (
     KotakCcTransactionParser(),
     KotakCardTransactionParser(),
+    KotakCardRefundParser(),
     KotakUpiPaymentParser(),
     KotakUpiReversalParser(),
     KotakImpsCreditParser(),
@@ -42,6 +44,7 @@ def parse(html: str) -> ParsedEmail:
 
 __all__ = [
     "Kotak811TransactionParser",
+    "KotakCardRefundParser",
     "KotakCardTransactionParser",
     "KotakCcBillPaidParser",
     "KotakCcTransactionParser",

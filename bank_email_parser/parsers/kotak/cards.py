@@ -119,6 +119,69 @@ class KotakCardTransactionParser(BaseEmailParser):
         )
 
 
+class KotakCardRefundParser(BaseEmailParser):
+    """Kotak Bank debit card transaction refund/credit.
+
+    Matches: 'The amount of Rs. 24.00 has been credited to your Kotak Bank Account
+    XXXXXX3782 against your recent Debit Card transaction with RRN 610548800719.'
+    """
+
+    bank = "kotak"
+    email_type = "kotak_card_refund"
+
+    _pattern = re.compile(
+        r"The\s+amount\s+of\s+(?:Rs\.?|₹|INR)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"has\s+been\s+credited\s+to\s+your\s+Kotak\s+Bank\s+Account\s+(?P<account>\w+)\s+"
+        r"against\s+your\s+recent\s+Debit\s+Card\s+transaction",
+        re.IGNORECASE,
+    )
+    _rrn_pattern = re.compile(
+        r"RRN\s+(?P<rrn>\w+)",
+        re.IGNORECASE,
+    )
+    _footer_date_pattern = re.compile(
+        r"sent\s+by\s+the\s+System\s*:\s*(?P<date>\d{2}/\d{2}/\d{2,4})\s+(?P<time>\d{2}:\d{2})",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse Kotak card refund.")
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        reference_number = None
+        if rrn_match := self._rrn_pattern.search(text):
+            reference_number = rrn_match.group("rrn")
+
+        txn_date = None
+        txn_time = None
+        if footer_match := self._footer_date_pattern.search(text):
+            parsed = _parse_kotak_datetime(
+                footer_match.group("date"),
+                footer_match.group("time"),
+            )
+            if parsed:
+                txn_date = parsed.date()
+                txn_time = parsed.time()
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                transaction_time=txn_time,
+                account_mask=match.group("account"),
+                reference_number=reference_number,
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class KotakCcBillPaidParser(BaseEmailParser):
     """Kotak811 credit card bill payment confirmation."""
 
