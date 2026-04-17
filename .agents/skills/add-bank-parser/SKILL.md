@@ -53,7 +53,7 @@ First match wins. Order matters:
 
 Statement parsers are inherently broad — they match on keywords like `"statement"` and `"password"` that can appear in transaction-alert footers. Under-guarded, a statement parser will eat unrelated emails.
 
-Guard strictly: require `"statement"` **AND** at least one attachment/password marker (`"password"`, `"attached"`, `"password-protected"`, or a bank-specific phrase). Place the parser last in `_PARSERS`.
+Guard strictly: require a password/attachment marker (`"password"`, `"attached"`, `"password-protected"`, `"statement is password protected"`, or similar) **AND** a bank brand anchor (bank name in the disclaimer/footer, product name, co-brand like `"edge csb"`). The brand anchor prevents a foreign email that happens to quote the same generic phrase from matching. Place the parser last in `_PARSERS`.
 
 Return `ParsedEmail(transaction=None, password_hint="...")` with a hardcoded hint describing the bank's scheme (e.g. `"Date of birth in DDMMYYYY format"`, `"First 4 letters of name (lowercase) + DDMM of birth"`, `"Customer ID as the password"`).
 
