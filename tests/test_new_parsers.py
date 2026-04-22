@@ -933,6 +933,82 @@ class TestIciciCcUpiPaymentAlertParser:
             parse_email("icici", html)
 
 
+class TestKotakCardRefundParser:
+    """Test KotakCardRefundParser for debit card refund/credit email."""
+
+    SAMPLE_HTML = """
+    <html><body>
+    <p>Dear Customer,<br><br>
+    Thank you for using Kotak Debit Card.<br><br>
+    The amount of Rs. 24.00 has been credited to your Kotak Bank Account XXXXXX3782
+    against your recent Debit Card transaction with RRN 610548800719.<br><br>
+    We request you to check your account statement for the details.<br><br>
+    Assuring you of our best services at all times.<br><br>
+    Warm regards,<br>Kotak Mahindra Bank<br><br>
+    This message was sent by the System :16/04/26 14:20</p>
+    </body></html>
+    """
+
+    def test_parses_card_refund(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "kotak_card_refund"
+        assert result.bank == "kotak"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("24.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.account_mask == "XXXXXX3782"
+        assert result.transaction.reference_number == "610548800719"
+        assert result.transaction.channel == "card"
+
+    def test_parses_date_and_time(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 4
+        assert result.transaction.transaction_date.day == 16
+        assert result.transaction.transaction_time is not None
+
+    def test_parses_without_footer_date(self):
+        html = """
+        <html><body>
+        <p>The amount of Rs. 500.00 has been credited to your Kotak Bank Account XX9988
+        against your recent Debit Card transaction with RRN ABC123456.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.email_type == "kotak_card_refund"
+        assert result.transaction.amount.amount == Decimal("500.00")
+        assert result.transaction.account_mask == "XX9988"
+        assert result.transaction.reference_number == "ABC123456"
+        assert result.transaction.transaction_date is None
+        assert result.transaction.transaction_time is None
+
+    def test_parses_inr_variant(self):
+        html = """
+        <html><body>
+        <p>The amount of INR 1500.00 has been credited to your Kotak Bank Account XX1234
+        against your recent Debit Card transaction with RRN 987654321098.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.transaction.amount.amount == Decimal("1500.00")
+
+    def test_parses_large_amount_with_commas(self):
+        html = """
+        <html><body>
+        <p>The amount of Rs.1,00,000.00 has been credited to your Kotak Bank Account XX5678
+        against your recent Debit Card transaction with RRN 111122223333.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.transaction.amount.amount == Decimal("100000.00")
+
+
 class TestJupiterUpiDebitAlertParser:
     """Test JupiterUpiDebitAlertParser against synthetic HTML mirroring the real
     'Your UPI payment was successful' email layout."""
