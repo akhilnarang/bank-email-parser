@@ -254,6 +254,59 @@ class TestKotakCardTransactionOnVariant:
         assert result.transaction.amount.amount == Decimal("2000.00")
 
 
+class TestEquitasCcStatementParser:
+    """Test Equitas credit card statement email parsing."""
+
+    SAMPLE_HTML = """
+    <html><body>
+      <table>
+        <tr><td><b>Dear SAMPLE CUSTOMER,</b></td></tr>
+        <tr>
+          <td>
+            We hope you are enjoying the choices that you have made with Equitas
+            Credit Card. Enclosed is credit card e-statement for your reference.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            Your e-statement is in Adobe Acrobat PDF format.
+          </td>
+        </tr>
+        <tr><td><b>Open your E-Statement with the Password:</b></td></tr>
+        <tr>
+          <td>
+            Enter the first four letters of your name in UPPER CASE and your date
+            of birth in DDMM format.
+          </td>
+        </tr>
+        <tr><td>Regards, Equitas Small Finance Bank</td></tr>
+      </table>
+    </body></html>
+    """
+
+    def test_parses_statement_email(self):
+        result = parse_email("equitas", self.SAMPLE_HTML)
+
+        assert result.email_type == "equitas_cc_statement"
+        assert result.bank == "equitas"
+        assert result.transaction is None
+        assert result.password_hint is not None
+        assert "UPPER CASE" in result.password_hint
+        assert "DDMM" in result.password_hint
+
+    def test_rejects_generic_statement_without_equitas_anchor(self):
+        html = """
+        <html><body>
+          <p>Your credit card e-statement is ready.</p>
+          <p>Open your e-statement with the password.</p>
+          <p>Your e-statement is in Adobe Acrobat PDF format.</p>
+        </body></html>
+        """
+
+        with pytest.raises(ParseError):
+            parse_email("equitas", html)
+
+
 class TestKotakUpiReversalParser:
     """Test KotakUpiReversalParser with UPI reversal credit email."""
 
@@ -814,6 +867,23 @@ class TestYesbankCcDebitAlertParser:
         with pytest.raises(ParseError):
             parse_email("yesbank", html)
 
+    def test_parses_small_decimal_amount(self):
+        """Amounts like '.05' (no leading digit) should parse correctly."""
+        html = """
+        <html><body>
+        <p>INR .05 has been spent on your YES BANK Credit Card ending with 4321
+        at SAMPLE MERCHANT on 19-04-2026 at 06:16:16 pm. Avl Bal INR 332,890.87.</p>
+        </body></html>
+        """
+        result = parse_email("yesbank", html)
+        assert result.transaction is not None
+        assert result.email_type == "yesbank_cc_debit_alert"
+        assert result.transaction.amount.amount == Decimal("0.05")
+        assert result.transaction.card_mask == "4321"
+        assert result.transaction.counterparty == "SAMPLE MERCHANT"
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("332890.87")
+
 
 class TestIciciCcUpiPaymentAlertParser:
     """Test ICICI CC UPI payment alert parser with synthetic HTML."""
@@ -1048,3 +1118,154 @@ class TestKotakCreditCardPaymentParser:
         assert result.transaction.amount.amount == Decimal("100000.00")
         assert result.transaction.balance is not None
         assert result.transaction.balance.amount == Decimal("250000")
+
+
+class TestJupiterUpiDebitAlertParser:
+    """Test JupiterUpiDebitAlertParser against synthetic HTML mirroring the real
+    'Your UPI payment was successful' email layout."""
+
+    SAMPLE_HTML = """
+    <html><body>
+    <table>
+      <tr><td></td>
+          <td><h1>Hey, Sample</h1><p>Your UPI payment</p><p>was successful</p></td>
+      </tr>
+      <tr>
+        <td><p>You paid</p></td>
+        <td><p>&#8377;8063</p></td>
+      </tr>
+      <tr>
+        <td><p>Paid to</p></td>
+        <td>
+          <p>Sample Merchant</p>
+          <p>SAMPLE@ybl</p>
+        </td>
+      </tr>
+      <tr>
+        <td><p>Date</p></td>
+        <td><p>Mar 18, 2026</p></td>
+      </tr>
+      <tr>
+        <td><p>From</p></td>
+        <td><p>Sample</p><p>user@example.test</p></td>
+      </tr>
+      <tr>
+        <td><p>Transaction ID</p></td>
+        <td><p>1321773823923284962</p></td>
+      </tr>
+      <tr>
+        <td><p>Bank reference Number</p></td>
+        <td><p>668354820776</p></td>
+      </tr>
+    </table>
+    </body></html>
+    """
+
+    def test_email_type_and_bank(self):
+        result = parse_email("jupiter", self.SAMPLE_HTML)
+        assert result.email_type == "jupiter_upi_debit_alert"
+        assert result.bank == "jupiter"
+        assert result.transaction is not None
+
+    def test_direction_and_channel(self):
+        result = parse_email("jupiter", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.direction == "debit"
+        assert result.transaction.channel == "upi"
+
+    def test_amount(self):
+        result = parse_email("jupiter", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.amount.amount == Decimal("8063")
+        assert result.transaction.amount.currency == "INR"
+
+    def test_counterparty_prefers_vpa_over_name(self):
+        result = parse_email("jupiter", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        # Mirrors IndusInd convention: full VPA wins over merchant display name.
+        assert result.transaction.counterparty == "SAMPLE@ybl"
+
+    def test_transaction_date(self):
+        result = parse_email("jupiter", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 3
+        assert result.transaction.transaction_date.day == 18
+
+    def test_reference_number_uses_bank_reference(self):
+        result = parse_email("jupiter", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        # Jupiter's 'Bank reference Number' is the UPI RRN -- that is what
+        # downstream consumers want as reference_number.
+        assert result.transaction.reference_number == "668354820776"
+
+    def test_rejects_unrelated_jupiter_email(self):
+        html = "<html><body><p>Welcome to Jupiter, your account is ready.</p></body></html>"
+        with pytest.raises(ParseError):
+            parse_email("jupiter", html)
+
+    def test_rejects_non_jupiter_upi_email(self):
+        html = "<html><body><p>Some random transactional email</p></body></html>"
+        with pytest.raises(ParseError):
+            parse_email("jupiter", html)
+
+
+class TestJupiterStatementEmailParser:
+    """Test JupiterStatementEmailParser against synthetic HTML mirroring the
+    real Edge CSB Bank RuPay Credit Card Statement email layout."""
+
+    SAMPLE_HTML = """
+    <html><body>
+      <table>
+        <tr><td>Your Edge CSB Bank RuPay Credit Card Statement</td></tr>
+        <tr><td>Hey <b>Sample</b>,</td></tr>
+        <tr><td>Your Edge CSB Bank RuPay Credit Card Statement for
+                17 Mar 2026 - 16 Apr 2026 is ready.</td></tr>
+        <tr><td>How do I access my statement?</td></tr>
+        <tr><td>Your statement is password protected.<br />
+                To open, enter the first four letters of your name in UPPER CASE
+                followed by your Date of Birth (DDMM).<br /><br />
+                For example:-<br />Name: Radhika<br />
+                Date of Birth: 11.02.1985 (DD.MM.YYYY)<br />
+                Password: RADH1102<br /><br />
+                Take a look at the attached PDF for a detailed breakdown.
+                Please ignore if already paid.</td></tr>
+      </table>
+      <div>Jupiter itself is not a bank.</div>
+    </body></html>
+    """
+
+    def test_email_type_and_bank(self):
+        result = parse_email("jupiter", self.SAMPLE_HTML)
+        assert result.email_type == "jupiter_statement"
+        assert result.bank == "jupiter"
+
+    def test_no_transaction(self):
+        result = parse_email("jupiter", self.SAMPLE_HTML)
+        assert result.transaction is None
+
+    def test_password_hint(self):
+        result = parse_email("jupiter", self.SAMPLE_HTML)
+        assert (
+            result.password_hint
+            == "First 4 characters of name (uppercase) + DDMM of birth"
+        )
+
+    def test_rejects_welcome_email(self):
+        html = (
+            "<html><body><p>Welcome to Jupiter! Your account is ready. "
+            "Explore rewards, pots, and more on the app.</p></body></html>"
+        )
+        with pytest.raises(ParseError):
+            parse_email("jupiter", html)
+
+    def test_rejects_alert_with_statement_footer(self):
+        """A transaction alert whose footer mentions 'statement' but lacks
+        the password-protected marker must not be matched."""
+        html = (
+            "<html><body><p>Your UPI payment of Rs 10 was successful. "
+            "Review your monthly statement in the Jupiter app.</p></body></html>"
+        )
+        with pytest.raises(ParseError):
+            parse_email("jupiter", html)

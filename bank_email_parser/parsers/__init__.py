@@ -8,6 +8,7 @@ from bank_email_parser.parsers.hsbc import HsbcParser
 from bank_email_parser.parsers.icici import IciciParser
 from bank_email_parser.parsers.idfc import IdfcParser
 from bank_email_parser.parsers.indusind import IndusindParser
+from bank_email_parser.parsers.jupiter import JupiterParser
 from bank_email_parser.parsers.kotak import KotakParser
 from bank_email_parser.parsers.onecard import OnecardParser
 from bank_email_parser.parsers.sbi import SbiParser
@@ -24,6 +25,7 @@ PARSERS = {
     "icici": IciciParser,
     "idfc": IdfcParser,
     "indusind": IndusindParser,
+    "jupiter": JupiterParser,
     "kotak": KotakParser,
     "onecard": OnecardParser,
     "sbi": SbiParser,

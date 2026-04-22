@@ -2,6 +2,7 @@
 
 Supported email types:
 - equitas_cc_alert: Credit card transaction (spend) alert
+- equitas_cc_statement: Credit card statement email with password hint
 """
 
 import re
@@ -10,7 +11,7 @@ from decimal import Decimal
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BankParser, BaseEmailParser
-from bank_email_parser.utils import parse_date, parse_datetime
+from bank_email_parser.parsing.dates import parse_date, parse_datetime
 
 
 def _clean_amount(raw: str) -> Decimal:
@@ -81,7 +82,44 @@ class EquitasCcAlertParser(BaseEmailParser):
         )
 
 
-_PARSERS = (EquitasCcAlertParser(),)
+class EquitasCcStatementParser(BaseEmailParser):
+    """Equitas Small Finance Bank credit card statement email."""
+
+    bank = "equitas"
+    email_type = "equitas_cc_statement"
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+        text_lower = text.lower()
+
+        has_brand_anchor = (
+            "equitas small finance bank" in text_lower
+            and "equitas credit card" in text_lower
+        )
+        has_statement_marker = (
+            "credit card e-statement" in text_lower
+            or "credit card statement" in text_lower
+        )
+        has_password_marker = (
+            "open your e-statement with the password" in text_lower
+            or (
+                "password" in text_lower
+                and "adobe acrobat pdf" in text_lower
+                and "date of birth in ddmm format" in text_lower
+            )
+        )
+
+        if not (has_brand_anchor and has_statement_marker and has_password_marker):
+            raise ParseError("Not an Equitas credit card statement email.")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            password_hint="First 4 letters of name in UPPER CASE (no spaces) + DDMM of birth",
+        )
+
+
+_PARSERS = (EquitasCcAlertParser(), EquitasCcStatementParser())
 
 
 def parse(html: str) -> ParsedEmail:
