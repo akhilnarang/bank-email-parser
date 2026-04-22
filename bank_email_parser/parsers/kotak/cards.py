@@ -182,6 +182,58 @@ class KotakCardRefundParser(BaseEmailParser):
         )
 
 
+class KotakCreditCardPaymentParser(BaseEmailParser):
+    """Kotak credit card payment confirmation.
+
+    Matches: 'Thank you for your payment of Rs.X for your Kotak Credit Card
+    ending with xxNNNN on DD-Mon-YYYY. Available credit limit is Rs.Y'
+    """
+
+    bank = "kotak"
+    email_type = "kotak_cc_payment"
+
+    _pattern = re.compile(
+        r"Thank\s+you\s+for\s+your\s+payment\s+of\s+"
+        r"(?:Rs\.?|₹|INR)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"for\s+your\s+Kotak\s+Credit\s+Card\s+ending\s+with\s+(?P<card>\w+)\s+"
+        r"on\s+(?P<date>\d{1,2}-\w{3}-\d{2,4})",
+        re.IGNORECASE,
+    )
+    _credit_limit_pattern = re.compile(
+        r"available\s+credit\s+limit\s+is\s+(?:Rs\.?|₹|INR)\s*(?P<limit>[\d,]+(?:\.\d+)?)",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse Kotak CC payment.")
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        txn_date = parse_date(match.group("date"))
+
+        balance = None
+        if lim_match := self._credit_limit_pattern.search(text):
+            if (lim_amount := parse_amount(lim_match.group("limit"))) is not None:
+                balance = Money(amount=lim_amount)
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                counterparty="Payment received",
+                card_mask=match.group("card"),
+                balance=balance,
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class KotakCcBillPaidParser(BaseEmailParser):
     """Kotak811 credit card bill payment confirmation."""
 

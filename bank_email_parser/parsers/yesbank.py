@@ -24,7 +24,7 @@ class YesbankCcDebitAlertParser(BaseEmailParser):
     email_type = "yesbank_cc_debit_alert"
 
     _pattern = re.compile(
-        r"INR\s+([\d,]+(?:\.\d{2})?)\s+has been spent on your YES BANK Credit Card ending with (\d{4})\s+"
+        r"INR\s+(\.\d{1,2}|[\d,]+(?:\.\d{2})?)\s+has been spent on your YES BANK Credit Card ending with (\d{4})\s+"
         r"at (.+?) on (\d{2}-\d{2}-\d{4}) at (\d{2}:\d{2}:\d{2})\s*(am|pm)"
         r"(?:\.\s*Avl Bal\s+INR\s+([\d,]+(?:\.\d{2})?))?",
         re.IGNORECASE,

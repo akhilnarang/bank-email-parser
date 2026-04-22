@@ -12,6 +12,7 @@ from .cards import (
     KotakCardTransactionParser,
     KotakCcBillPaidParser,
     KotakCcTransactionParser,
+    KotakCreditCardPaymentParser,
 )
 from .digital import Kotak811TransactionParser, KotakDigitalTransactionParser
 from .statement import KotakStatementEmailParser
@@ -21,6 +22,7 @@ _PARSERS = (
     KotakCcTransactionParser(),
     KotakCardTransactionParser(),
     KotakCardRefundParser(),
+    KotakCreditCardPaymentParser(),
     KotakUpiPaymentParser(),
     KotakUpiReversalParser(),
     KotakImpsCreditParser(),
@@ -48,6 +50,7 @@ __all__ = [
     "KotakCardTransactionParser",
     "KotakCcBillPaidParser",
     "KotakCcTransactionParser",
+    "KotakCreditCardPaymentParser",
     "KotakDigitalTransactionParser",
     "KotakImpsCreditParser",
     "KotakNachDebitParser",

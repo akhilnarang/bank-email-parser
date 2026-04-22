@@ -867,6 +867,23 @@ class TestYesbankCcDebitAlertParser:
         with pytest.raises(ParseError):
             parse_email("yesbank", html)
 
+    def test_parses_small_decimal_amount(self):
+        """Amounts like '.05' (no leading digit) should parse correctly."""
+        html = """
+        <html><body>
+        <p>INR .05 has been spent on your YES BANK Credit Card ending with 4321
+        at SAMPLE MERCHANT on 19-04-2026 at 06:16:16 pm. Avl Bal INR 332,890.87.</p>
+        </body></html>
+        """
+        result = parse_email("yesbank", html)
+        assert result.transaction is not None
+        assert result.email_type == "yesbank_cc_debit_alert"
+        assert result.transaction.amount.amount == Decimal("0.05")
+        assert result.transaction.card_mask == "4321"
+        assert result.transaction.counterparty == "SAMPLE MERCHANT"
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("332890.87")
+
 
 class TestIciciCcUpiPaymentAlertParser:
     """Test ICICI CC UPI payment alert parser with synthetic HTML."""
@@ -1007,6 +1024,101 @@ class TestKotakCardRefundParser:
         result = parse_email("kotak", html)
         assert result.transaction is not None
         assert result.transaction.amount.amount == Decimal("100000.00")
+
+
+class TestKotakCreditCardPaymentParser:
+    """Test KotakCreditCardPaymentParser for CC payment confirmation email."""
+
+    SAMPLE_HTML = """
+    <html><body>
+    <p>Dear Customer,<br><br>
+    Thank you for your payment of Rs.2537.75 for your Kotak Credit Card ending with xx7291
+    on 14-Mar-2025. Available credit limit is Rs.85000<br><br>
+    Assuring you the best of our services at all times.<br><br>
+    Warm Regards,<br>Kotak Mahindra Bank Ltd.</p>
+    </body></html>
+    """
+
+    def test_parses_cc_payment(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "kotak_cc_payment"
+        assert result.bank == "kotak"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("2537.75")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.card_mask == "xx7291"
+        assert result.transaction.counterparty == "Payment received"
+        assert result.transaction.channel == "card"
+
+    def test_parses_date(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2025
+        assert result.transaction.transaction_date.month == 3
+        assert result.transaction.transaction_date.day == 14
+
+    def test_parses_credit_limit(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("85000")
+
+    def test_parses_without_credit_limit(self):
+        html = """
+        <html><body>
+        <p>Thank you for your payment of Rs.1500.00 for your Kotak Credit Card
+        ending with XX9988 on 15-Jan-2026.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.email_type == "kotak_cc_payment"
+        assert result.transaction.amount.amount == Decimal("1500.00")
+        assert result.transaction.card_mask == "XX9988"
+        assert result.transaction.balance is None
+
+    def test_parses_inr_variant(self):
+        html = """
+        <html><body>
+        <p>Thank you for your payment of INR 2500.00 for your Kotak Credit Card
+        ending with xx1234 on 03-Mar-2026. Available credit limit is INR 50000.00</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.email_type == "kotak_cc_payment"
+        assert result.transaction.amount.amount == Decimal("2500.00")
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("50000.00")
+
+    def test_parses_rupee_symbol_variant(self):
+        html = """
+        <html><body>
+        <p>Thank you for your payment of ₹ 750.50 for your Kotak Credit Card
+        ending with xx5678 on 10-Feb-2026. Available credit limit is ₹ 25000</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.email_type == "kotak_cc_payment"
+        assert result.transaction.amount.amount == Decimal("750.50")
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("25000")
+
+    def test_parses_large_amount_with_commas(self):
+        html = """
+        <html><body>
+        <p>Thank you for your payment of Rs.1,00,000.00 for your Kotak Credit Card
+        ending with xx4242 on 28-Feb-2026. Available credit limit is Rs.2,50,000</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.transaction.amount.amount == Decimal("100000.00")
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("250000")
 
 
 class TestJupiterUpiDebitAlertParser:
