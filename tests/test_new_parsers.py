@@ -254,6 +254,59 @@ class TestKotakCardTransactionOnVariant:
         assert result.transaction.amount.amount == Decimal("2000.00")
 
 
+class TestEquitasCcStatementParser:
+    """Test Equitas credit card statement email parsing."""
+
+    SAMPLE_HTML = """
+    <html><body>
+      <table>
+        <tr><td><b>Dear SAMPLE CUSTOMER,</b></td></tr>
+        <tr>
+          <td>
+            We hope you are enjoying the choices that you have made with Equitas
+            Credit Card. Enclosed is credit card e-statement for your reference.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            Your e-statement is in Adobe Acrobat PDF format.
+          </td>
+        </tr>
+        <tr><td><b>Open your E-Statement with the Password:</b></td></tr>
+        <tr>
+          <td>
+            Enter the first four letters of your name in UPPER CASE and your date
+            of birth in DDMM format.
+          </td>
+        </tr>
+        <tr><td>Regards, Equitas Small Finance Bank</td></tr>
+      </table>
+    </body></html>
+    """
+
+    def test_parses_statement_email(self):
+        result = parse_email("equitas", self.SAMPLE_HTML)
+
+        assert result.email_type == "equitas_cc_statement"
+        assert result.bank == "equitas"
+        assert result.transaction is None
+        assert result.password_hint is not None
+        assert "UPPER CASE" in result.password_hint
+        assert "DDMM" in result.password_hint
+
+    def test_rejects_generic_statement_without_equitas_anchor(self):
+        html = """
+        <html><body>
+          <p>Your credit card e-statement is ready.</p>
+          <p>Open your e-statement with the password.</p>
+          <p>Your e-statement is in Adobe Acrobat PDF format.</p>
+        </body></html>
+        """
+
+        with pytest.raises(ParseError):
+            parse_email("equitas", html)
+
+
 class TestKotakUpiReversalParser:
     """Test KotakUpiReversalParser with UPI reversal credit email."""
 
