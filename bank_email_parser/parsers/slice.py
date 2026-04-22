@@ -4,6 +4,8 @@ Supported email types:
 - slice_transaction_alert: UPI/IMPS/NEFT credit or debit alert ('received/sent via' pattern)
 - slice_transfer_alert: IMPS/RTGS/NEFT debit alert ('transaction of ₹X from' pattern); skips 'initiated' emails
 - slice_cc_payment_alert: Slice credit card bill repayment received
+- slice_cc_statement: Slice credit card monthly statement announcement
+- slice_account_statement: Slice savings account statement (password-protected PDF)
 """
 
 import re
@@ -226,6 +228,32 @@ class SliceCcPaymentAlertParser(BaseEmailParser):
         )
 
 
+class SliceCcStatementParser(BaseEmailParser):
+    """Slice credit card monthly statement announcement.
+
+    Matches the 'Your slice credit card statement for <Month Year> is ready'
+    email. The PDF is attached in-email and is not password-protected, so no
+    password hint is surfaced.
+    """
+
+    bank = "slice"
+    email_type = "slice_cc_statement"
+
+    _pattern = re.compile(
+        r"slice\s+credit\s+card\s+statement\s+for\s+\w+\s+\d{4}\s+is\s+ready",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+        if not self._pattern.search(text):
+            raise ParseError("Not a Slice credit card statement email.")
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+        )
+
+
 class SliceStatementEmailParser(BaseEmailParser):
     """Slice account statement email."""
 
@@ -247,6 +275,7 @@ _PARSERS = (
     SliceTransactionAlertParser(),
     SliceTransferAlertParser(),
     SliceCcPaymentAlertParser(),
+    SliceCcStatementParser(),
     SliceStatementEmailParser(),
 )
 
