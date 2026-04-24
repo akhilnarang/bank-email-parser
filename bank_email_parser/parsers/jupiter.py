@@ -48,7 +48,9 @@ class JupiterUpiDebitAlertParser(BaseEmailParser):
         ``MERCHANT@ybl``). Either may be missing.
         """
         paragraphs = [
-            p.get_text(strip=True) for p in value_cell.find_all("p") if p.get_text(strip=True)
+            p.get_text(strip=True)
+            for p in value_cell.find_all("p")
+            if p.get_text(strip=True)
         ]
         name: str | None = None
         vpa: str | None = None
