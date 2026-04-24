@@ -1270,3 +1270,186 @@ class TestJupiterStatementEmailParser:
         )
         with pytest.raises(ParseError):
             parse_email("jupiter", html)
+
+
+class TestOnecardCcStatementParser:
+    """Test OnecardCcStatementParser with synthetic HTML matching the body layout.
+
+    Layout in the real email: three parallel cells labeled 'Total amount due',
+    'Minimum amount due', 'Payment due date', each followed by an ``<p
+    class="amount">`` value. After BeautifulSoup get_text + normalize_whitespace,
+    these render as adjacent label-value pairs on the normalized text.
+    """
+
+    SAMPLE_HTML = """
+    <html><body>
+      <p>Your BOBCARD One Credit Card statement for January 2099</p>
+      <table>
+        <tr>
+          <td>
+            <p><b>Total amount due</b></p>
+            <p class="amount">&#8377; 1,234.56</p>
+          </td>
+          <td>
+            <p><b>Minimum amount due</b></p>
+            <p class="amount">&#8377; 100.00</p>
+          </td>
+          <td>
+            <p><b>Payment <br/> due date</b></p>
+            <p class="amount">15 Jun, 2099</p>
+          </td>
+        </tr>
+      </table>
+    </body></html>
+    """
+
+    def test_parses_onecard_statement(self):
+        result = parse_email("onecard", self.SAMPLE_HTML)
+        assert result.email_type == "onecard_cc_statement"
+        assert result.bank == "onecard"
+        assert result.transaction is None
+        assert result.statement is not None
+        assert result.statement.total_amount_due is not None
+        assert result.statement.total_amount_due.amount == Decimal("1234.56")
+        assert result.statement.total_amount_due.currency == "INR"
+        assert result.statement.minimum_amount_due is not None
+        assert result.statement.minimum_amount_due.amount == Decimal("100.00")
+        assert result.statement.due_date is not None
+        assert result.statement.due_date.year == 2099
+        assert result.statement.due_date.month == 6
+        assert result.statement.due_date.day == 15
+
+    def test_missing_total_raises(self):
+        html = """
+        <html><body>
+          <p>Your BOBCARD One Credit Card statement for January 2099</p>
+          <table>
+            <tr>
+              <td>
+                <p>Minimum amount due</p>
+                <p class="amount">&#8377; 100.00</p>
+              </td>
+              <td>
+                <p>Payment due date</p>
+                <p class="amount">15 Jun, 2099</p>
+              </td>
+            </tr>
+          </table>
+        </body></html>
+        """
+        with pytest.raises(ParseError):
+            parse_email("onecard", html)
+
+    def test_rejects_unrelated_html(self):
+        html = (
+            "<html><body>"
+            "<p>Amount: INR 500.00 Merchant: SAMPLE MERCHANT "
+            "Date: 15/01/2099 Time: 10:30:00</p>"
+            "</body></html>"
+        )
+        # This matches the debit alert format, not the statement — should parse
+        # as a transaction, not a statement.
+        result = parse_email("onecard", html)
+        assert result.email_type != "onecard_cc_statement"
+
+    def test_rejects_totally_unrelated(self):
+        html = "<html><body><p>Promotional offer from OneCard.</p></body></html>"
+        with pytest.raises(ParseError):
+            parse_email("onecard", html)
+
+    def test_parses_with_colon_labels(self):
+        """Label punctuation variant: `Total amount due:` with a colon."""
+        html = """
+        <html><body>
+          <p>Your BOBCARD One Credit Card statement for January 2099</p>
+          <table>
+            <tr>
+              <td>
+                <p>Total amount due:</p>
+                <p class="amount">&#8377; 2,500.00</p>
+              </td>
+              <td>
+                <p>Minimum amount due :</p>
+                <p class="amount">&#8377; 250.00</p>
+              </td>
+              <td>
+                <p>Payment due date:</p>
+                <p class="amount">20 Jul, 2099</p>
+              </td>
+            </tr>
+          </table>
+        </body></html>
+        """
+        result = parse_email("onecard", html)
+        assert result.email_type == "onecard_cc_statement"
+        assert result.statement is not None
+        assert result.statement.total_amount_due is not None
+        assert result.statement.total_amount_due.amount == Decimal("2500.00")
+        assert result.statement.minimum_amount_due is not None
+        assert result.statement.minimum_amount_due.amount == Decimal("250.00")
+        assert result.statement.due_date is not None
+        assert result.statement.due_date.day == 20
+
+    def test_parses_e_statement_variant(self):
+        """Marker tolerates 'e-statement' / 'estatement' wording."""
+        html = """
+        <html><body>
+          <p>Your BOBCARD One Credit Card e-statement for March 2099</p>
+          <p>Total amount due</p>
+          <p class="amount">&#8377; 999.99</p>
+          <p>Minimum amount due</p>
+          <p class="amount">&#8377; 100.00</p>
+          <p>Payment due date</p>
+          <p class="amount">10 Apr, 2099</p>
+        </body></html>
+        """
+        result = parse_email("onecard", html)
+        assert result.email_type == "onecard_cc_statement"
+        assert result.statement is not None
+        assert result.statement.total_amount_due is not None
+        assert result.statement.total_amount_due.amount == Decimal("999.99")
+
+    @pytest.mark.parametrize("marker", ["e-statement", "estatement", "E-Statement"])
+    def test_parses_e_statement_wording_variants(self, marker):
+        """The 'e-statement' / 'estatement' tolerance covers case + hyphen variants."""
+        html = (
+            f"<html><body>"
+            f"<p>Your BOBCARD One Credit Card {marker} for March 2099</p>"
+            f'<p>Total amount due</p><p class="amount">&#8377; 500.00</p>'
+            f'<p>Payment due date</p><p class="amount">10 Apr, 2099</p>'
+            f"</body></html>"
+        )
+        result = parse_email("onecard", html)
+        assert result.email_type == "onecard_cc_statement"
+
+    def test_parses_multi_token_month_marker(self):
+        """Marker allows 1–3 tokens before the year (e.g. 'Early January')."""
+        html = """
+        <html><body>
+          <p>Your BOBCARD One Credit Card statement for Early January 2099</p>
+          <p>Total amount due</p>
+          <p class="amount">&#8377; 500.00</p>
+          <p>Payment due date</p>
+          <p class="amount">10 Feb, 2099</p>
+        </body></html>
+        """
+        result = parse_email("onecard", html)
+        assert result.email_type == "onecard_cc_statement"
+
+    def test_parses_without_minimum_amount(self):
+        """Minimum amount is optional — should still succeed if it's absent."""
+        html = """
+        <html><body>
+          <p>Your BOBCARD One Credit Card statement for April 2099</p>
+          <p>Total amount due</p>
+          <p class="amount">&#8377; 5,000.00</p>
+          <p>Payment due date</p>
+          <p class="amount">25 May, 2099</p>
+        </body></html>
+        """
+        result = parse_email("onecard", html)
+        assert result.email_type == "onecard_cc_statement"
+        assert result.statement is not None
+        assert result.statement.total_amount_due is not None
+        assert result.statement.minimum_amount_due is None
+        assert result.statement.due_date is not None
