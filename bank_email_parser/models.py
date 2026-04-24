@@ -31,8 +31,24 @@ class TransactionAlert(BaseModel):
     )
 
 
+class StatementSummary(BaseModel):
+    total_amount_due: Money | None = None
+    minimum_amount_due: Money | None = None
+    due_date: date | None = None
+    card_mask: str | None = None
+    statement_period_start: date | None = None
+    statement_period_end: date | None = None
+    raw_description: str | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        description="Debug-only raw parser context; excluded from serialized output by default.",
+    )
+
+
 class ParsedEmail(BaseModel):
     email_type: str
     bank: str
     transaction: TransactionAlert | None = None
+    statement: StatementSummary | None = None
     password_hint: str | None = None
