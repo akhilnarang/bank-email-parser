@@ -273,6 +273,10 @@ class TestKotakCardTransactionOnVariant:
         assert result.transaction.reference_number == "987654321098"
         assert result.transaction.balance is not None
         assert result.transaction.balance.amount == Decimal("8765.43")
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.isoformat() == "2026-04-22"
+        assert result.transaction.transaction_time is not None
+        assert result.transaction.transaction_time.isoformat() == "22:36:25"
 
 
 class TestEquitasCcStatementParser:
