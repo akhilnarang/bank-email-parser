@@ -69,7 +69,7 @@ class KotakCardTransactionParser(BaseEmailParser):
         r"Your\s+transaction\s+of\s+(?:Rs\.?|₹|INR)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
         r"(?:at|on)\s+(?P<merchant>.+?)\s+"
         r"using\s+Kotak\s+Bank\s+(?P<card_type>Debit|Credit)\s+Card\s+(?P<card>\w+)\s+"
-        r"on\s+(?P<date>\d{2}/\d{2}/\d{4})\s+(?P<time>\d{2}:\d{2}:\d{2})\s+"
+        r"on\s+(?P<date>\d{2}/\d{2}/\d{4})\s+(?P<time>\d{2}:\d{2}:\d{2})(?:\s+(?!from\b)[A-Z]{2,4})?\s+"
         r"from\s+your\s+account\s+(?P<account>\w+)\s+"
         r"has\s+been\s+processed",
         re.IGNORECASE,

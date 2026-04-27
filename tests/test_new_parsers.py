@@ -253,6 +253,31 @@ class TestKotakCardTransactionOnVariant:
         assert result.transaction.counterparty == "SAMPLE STORE"
         assert result.transaction.amount.amount == Decimal("2000.00")
 
+    def test_ist_timezone_variant(self):
+        """Ensure 'IST' after the time is handled."""
+        html = """
+        <html><body>
+        <p>Dear Customer,<br>
+        Your transaction of Rs.5500.50 on SAMPLE MERCHANT using Kotak Bank Debit Card XX9999
+        on 22/04/2026 22:36:25 IST from your account XX1234 has been processed.<br>
+        The transaction reference No is 987654321098 &amp; Available balance is Rs.8765.43.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.email_type == "kotak_card_transaction"
+        assert result.transaction.counterparty == "SAMPLE MERCHANT"
+        assert result.transaction.card_mask == "XX9999"
+        assert result.transaction.account_mask == "XX1234"
+        assert result.transaction.amount.amount == Decimal("5500.50")
+        assert result.transaction.reference_number == "987654321098"
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("8765.43")
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.isoformat() == "2026-04-22"
+        assert result.transaction.transaction_time is not None
+        assert result.transaction.transaction_time.isoformat() == "22:36:25"
+
 
 class TestEquitasCcStatementParser:
     """Test Equitas credit card statement email parsing."""
