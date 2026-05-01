@@ -3,6 +3,7 @@
 Supported email types:
 - idfc_account_alert: Savings account credit/debit alert (RTGS/NEFT/IMPS)
 - idfc_cc_debit_alert: Credit card spend alert
+- idfc_cc_credit_alert: Credit card payment received alert
 """
 
 import re
@@ -133,6 +134,51 @@ class IdfcCcDebitAlertParser(BaseEmailParser):
         )
 
 
+class IdfcCcCreditAlertParser(BaseEmailParser):
+    """IDFC FIRST Bank credit card payment received alert.
+
+    Matches:
+      'Payment of Rs. 1,234.56 was received on your FIRST Wealth Credit Card
+       ending with XX1234 on 15 May 2099.'
+    """
+
+    bank = "idfc"
+    email_type = "idfc_cc_credit_alert"
+
+    _pattern = re.compile(
+        r"Payment\s+of\s+(?:Rs\.?|INR|₹)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"was\s+received\s+on\s+your\s+"
+        r"(?:IDFC\s+FIRST\s+BANK\s+|FIRST\s+\w+\s+)?Credit\s+Card\s+"
+        r"ending\s+with\s+(?P<card>\S+)\s+"
+        r"on\s+(?P<date>\d{1,2}\s+\w+\s+\d{4})\.",
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse IDFC CC credit alert.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        txn_dt = parse_datetime(match.group("date"))
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount),
+                transaction_date=txn_dt.date() if txn_dt else None,
+                counterparty="Payment received",
+                card_mask=match.group("card"),
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class IdfcStatementEmailParser(BaseEmailParser):
     """IDFC account statement email."""
 
@@ -153,6 +199,7 @@ class IdfcStatementEmailParser(BaseEmailParser):
 _PARSERS = (
     IdfcAccountAlertParser(),
     IdfcCcDebitAlertParser(),
+    IdfcCcCreditAlertParser(),
     IdfcStatementEmailParser(),
 )
 

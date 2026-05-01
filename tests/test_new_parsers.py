@@ -279,6 +279,43 @@ class TestKotakCardTransactionOnVariant:
         assert result.transaction.transaction_time.isoformat() == "22:36:25"
 
 
+class TestIdfcCcCreditAlertParser:
+    """Test IDFC FIRST credit card payment received alerts."""
+
+    SAMPLE_HTML = """
+    <html><body>
+      <p>Dear Customer,</p>
+      <p>
+        Payment of Rs. 1,234.56 was received on your FIRST Wealth Credit Card
+        ending with XX1234 on 15 May 2099.
+      </p>
+      <p>Always You First,<br>IDFC FIRST Bank</p>
+    </body></html>
+    """
+
+    def test_parses_payment_received(self):
+        result = parse_email("idfc", self.SAMPLE_HTML)
+
+        assert result.transaction is not None
+        assert result.email_type == "idfc_cc_credit_alert"
+        assert result.bank == "idfc"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("1234.56")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.card_mask == "XX1234"
+        assert result.transaction.counterparty == "Payment received"
+        assert result.transaction.channel == "card"
+
+    def test_parses_transaction_date(self):
+        result = parse_email("idfc", self.SAMPLE_HTML)
+
+        assert result.transaction is not None
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2099
+        assert result.transaction.transaction_date.month == 5
+        assert result.transaction.transaction_date.day == 15
+
+
 class TestEquitasCcStatementParser:
     """Test Equitas credit card statement email parsing."""
 
