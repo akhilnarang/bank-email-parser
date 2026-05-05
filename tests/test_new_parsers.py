@@ -369,6 +369,62 @@ class TestEquitasCcStatementParser:
             parse_email("equitas", html)
 
 
+class TestEquitasCcPaymentAlertParser:
+    """Test Equitas credit card payment received email parsing."""
+
+    SAMPLE_HTML = """
+    <html><body>
+      <p>Dear Mr. Sample Customer,</p>
+      <p>Greetings from Equitas Small Finance Bank!</p>
+      <p>We inform you that INR 12,345.00 was received on 05/05/2026
+      and was credited to your Equitas Credit Card XX9999.</p>
+      <p>Best Regards,<br/>Equitas Small Finance Bank</p>
+    </body></html>
+    """
+
+    def test_parses_payment_received(self):
+        result = parse_email("equitas", self.SAMPLE_HTML)
+
+        assert result.email_type == "equitas_cc_payment_alert"
+        assert result.bank == "equitas"
+        assert result.transaction is not None
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("12345.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.card_mask == "9999"
+        assert result.transaction.counterparty == "Payment received"
+        assert result.transaction.channel == "card"
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 5
+        assert result.transaction.transaction_date.day == 5
+
+    def test_parses_plain_text_email(self):
+        text = (
+            "Dear Mr. Sample,\n\n"
+            "We inform you that INR 1,234.56 was received on 12/04/2026 and was "
+            "credited to your Equitas Credit Card XX8765.\n"
+        )
+        result = parse_email("equitas", text)
+
+        assert result.email_type == "equitas_cc_payment_alert"
+        assert result.transaction is not None
+        assert result.transaction.amount.amount == Decimal("1234.56")
+        assert result.transaction.card_mask == "8765"
+
+    def test_does_not_match_spend_alert(self):
+        text = (
+            "We inform you that INR 1,500.00 was spent on your Equitas Credit Card "
+            "ending with 9999 at SAMPLE STORE on 15-01-2026 at 02:23:51 pm. "
+            "Your available balance is INR 50,000.00."
+        )
+        result = parse_email("equitas", text)
+
+        assert result.email_type == "equitas_cc_alert"
+        assert result.transaction is not None
+        assert result.transaction.direction == "debit"
+
+
 class TestKotakUpiReversalParser:
     """Test KotakUpiReversalParser with UPI reversal credit email."""
 

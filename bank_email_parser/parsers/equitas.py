@@ -2,6 +2,7 @@
 
 Supported email types:
 - equitas_cc_alert: Credit card transaction (spend) alert
+- equitas_cc_payment_alert: Credit card payment received (credit) alert
 - equitas_cc_statement: Credit card statement email with password hint
 """
 
@@ -82,6 +83,53 @@ class EquitasCcAlertParser(BaseEmailParser):
         )
 
 
+class EquitasCcPaymentAlertParser(BaseEmailParser):
+    """Equitas Small Finance Bank credit card payment received alert.
+
+    Matches plain-text alerts like:
+      'We inform you that INR 12,345.00 was received on 15-01-2026
+       and was credited to your Equitas Credit Card XX9999.'
+    """
+
+    bank = "equitas"
+    email_type = "equitas_cc_payment_alert"
+
+    _pattern = re.compile(
+        r"We\s+inform\s+you\s+that\s+"
+        r"(?P<currency>INR|Rs\.?|₹)\s*(?P<amount>[\d,]+\.\d{2})\s+"
+        r"was\s+received\s+on\s+(?P<date>\d{2}/\d{2}/\d{4})\s+"
+        r"and\s+was\s+credited\s+to\s+your\s+Equitas\s+Credit\s+Card\s+"
+        r"XX(?P<card>\d{4})",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse Equitas credit card payment alert.")
+
+        currency_raw = match.group("currency").upper()
+        currency = "INR" if currency_raw in {"INR", "RS", "RS.", "₹"} else currency_raw
+        amount = _clean_amount(match.group("amount"))
+        card_mask = match.group("card")
+        transaction_date = parse_date(match.group("date"))
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount, currency=currency),
+                transaction_date=transaction_date,
+                counterparty="Payment received",
+                card_mask=card_mask,
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class EquitasCcStatementParser(BaseEmailParser):
     """Equitas Small Finance Bank credit card statement email."""
 
@@ -119,7 +167,11 @@ class EquitasCcStatementParser(BaseEmailParser):
         )
 
 
-_PARSERS = (EquitasCcAlertParser(), EquitasCcStatementParser())
+_PARSERS = (
+    EquitasCcAlertParser(),
+    EquitasCcPaymentAlertParser(),
+    EquitasCcStatementParser(),
+)
 
 
 def parse(html: str) -> ParsedEmail:
