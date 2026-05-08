@@ -63,7 +63,3 @@ Checklist:
 ## Known stubs
 
 - `axis_neft_alert` — intentional stub pending a sample email
-
-## Cross-project
-
-When adding a new bank, also update fetch rules in `bank-email-fetcher/seed.py`.
