@@ -284,7 +284,20 @@ class KotakCcBillPaidParser(BaseEmailParser):
         if bank_match := self._bank_pattern.search(text):
             counterparty = bank_match.group("bank_name").strip()
 
-        raw_description = f"CC bill paid: {amount} to {counterparty or 'unknown'}"
+        # The card mask in the email body identifies the *destination*
+        # CC (the one whose bill was paid), not the source account
+        # (the user's Kotak savings, which actually got debited).
+        # Emit it inside ``raw_description`` for human visibility but
+        # do NOT set ``card_mask`` — otherwise the linker will attach
+        # this debit to the destination CC's account, distorting that
+        # account's balance and orphaning the source savings record.
+        # With ``card_mask`` and ``account_mask`` both empty, the linker
+        # falls through to its bank-only path and lands the txn on the
+        # user's Kotak account (the source).
+        raw_description_parts = [f"CC bill paid: {amount} to {counterparty or 'unknown'}"]
+        if card_mask:
+            raw_description_parts.append(f"({card_mask})")
+        raw_description = " ".join(raw_description_parts)
         return ParsedEmail(
             email_type=self.email_type,
             bank=self.bank,
@@ -293,8 +306,8 @@ class KotakCcBillPaidParser(BaseEmailParser):
                 amount=Money(amount=amount),
                 transaction_date=txn_date,
                 counterparty=counterparty,
-                card_mask=card_mask,
-                channel="card",
+                card_mask=None,
+                channel="netbanking",
                 raw_description=raw_description,
             ),
         )

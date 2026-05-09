@@ -83,7 +83,17 @@ class TestKotakCcBillPaidParser:
         assert result.transaction.direction == "debit"
         assert result.transaction.amount.amount == Decimal("2345")
         assert result.transaction.amount.currency == "INR"
-        assert result.transaction.card_mask == "**** 4242"
+        # The card mask in the email body identifies the *destination*
+        # credit card (the one whose bill was paid), not the source
+        # account (the user's Kotak savings). Emitting it as
+        # ``card_mask`` makes the downstream linker mis-attach this
+        # debit to the destination CC's account, which is exactly
+        # backwards. Keep the destination card info inside
+        # ``raw_description`` and let the linker fall back to the
+        # bank-only path so the txn lands on the source Kotak account.
+        assert result.transaction.card_mask is None
+        assert result.transaction.channel == "netbanking"
+        assert "**** 4242" in (result.transaction.raw_description or "")
 
     def test_parses_date(self):
         result = parse_email("kotak", self.SAMPLE_HTML)
@@ -115,7 +125,10 @@ class TestKotakCcBillPaidParser:
         result = parse_email("kotak", html)
         assert result.transaction is not None
         assert result.email_type == "kotak_cc_bill_paid"
-        assert result.transaction.card_mask == "**** 5151"
+        # Destination card mask preserved in narration only — see comment
+        # on ``test_parses_cc_bill_paid``.
+        assert result.transaction.card_mask is None
+        assert "**** 5151" in (result.transaction.raw_description or "")
         assert result.transaction.counterparty is not None
         assert "HSBC" in result.transaction.counterparty
 
