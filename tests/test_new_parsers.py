@@ -873,6 +873,63 @@ class TestKotakImpsCreditParser:
         assert result.transaction.amount.amount == Decimal("100000.00")
 
 
+class TestHdfcUpiAlertParser:
+    """Test HDFC UPI savings-account debit/credit alerts.
+
+    Two notification formats coexist in production. The classic format
+    used ``has been debited from account X to VPA Y`` + ``UPI transaction
+    reference number is N``. The newer format (observed mid-2026) uses
+    ``is debited from your account ending X towards VPA Y`` + ``UPI
+    transaction reference no.: N``. Both must parse.
+    """
+
+    def test_parses_classic_debit_format(self):
+        html = """
+        <html><body>
+        Rs.5000.00 has been debited from account 1234 to VPA merchant@upi Sample Merchant on 15-01-26.
+        Your UPI transaction reference number is 123456789012.
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_upi_alert"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("5000.00")
+        assert result.transaction.account_mask == "1234"
+        assert result.transaction.counterparty == "Sample Merchant"
+        assert result.transaction.reference_number == "123456789012"
+        assert result.transaction.channel == "upi"
+
+    def test_parses_new_debit_format_with_towards_and_ref_no(self):
+        """Newer wording shipped alongside the classic format: the verb
+        is ``is debited`` not ``has been debited``, the account is
+        referred to as ``account ending X`` not ``account X``, the
+        preposition is ``towards VPA`` not ``to VPA``, and the reference
+        label is ``UPI transaction reference no.: N`` not ``...
+        reference number is N``. Each substitution alone breaks the
+        strict pattern."""
+        html = """
+        <html><body>
+        Dear Customer, Greetings from HDFC Bank!
+        Rs.5000.00 is debited from your account ending 1234 towards VPA sample.merchant@bank (Sample Merchant) on 08-05-26.
+        UPI transaction reference no.: 100200300400.
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_upi_alert"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("5000.00")
+        assert result.transaction.account_mask == "1234"
+        assert result.transaction.counterparty == "(Sample Merchant)"
+        assert result.transaction.reference_number == "100200300400"
+        assert result.transaction.channel == "upi"
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 5
+        assert result.transaction.transaction_date.day == 8
+
+
 class TestHdfcRupayUpiDebitParser:
     """Test HDFC RuPay credit card UPI debit alerts."""
 

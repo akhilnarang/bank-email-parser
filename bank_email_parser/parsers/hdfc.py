@@ -28,11 +28,17 @@ class HdfcUpiAlertParser(BaseEmailParser):
     bank = "hdfc"
     email_type = "hdfc_upi_alert"
 
-    # Debit: "Rs.5000.00 has been debited from account 1234 to VPA merchant@upi Sample Merchant on 15-01-26."
+    # Debit. HDFC ships two coexisting variants, captured by one
+    # alternated regex:
+    #   classic: "Rs.5000.00 has been debited from account 1234
+    #             to VPA merchant@upi Sample Merchant on 15-01-26."
+    #   newer:   "Rs.50000.00 is debited from your account ending 7703
+    #             towards VPA ppfas.common.mf@validicici (PPFASMF) on 08-05-26."
     _debit_pattern = re.compile(
         r"Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
-        r"has\s+been\s+debited\s+from\s+account\s+(?P<account>\w+)\s+"
-        r"to\s+VPA\s+(?P<vpa>\S+)\s+(?P<counterparty>.+?)\s+"
+        r"(?:has\s+been|is)\s+debited\s+from\s+(?:your\s+)?account\s+"
+        r"(?:ending\s+)?(?P<account>\w+)\s+"
+        r"(?:to|towards)\s+VPA\s+(?P<vpa>\S+)\s+(?P<counterparty>.+?)\s+"
         r"on\s+(?P<date>[\d\-]+)\.",
     )
 
@@ -52,8 +58,11 @@ class HdfcUpiAlertParser(BaseEmailParser):
         r"on\s+(?P<date>[\d\-]+)\.",
     )
 
+    # Reference label varies between formats:
+    #   classic: "Your UPI transaction reference number is 123456789012"
+    #   newer:   "UPI transaction reference no.: 612853660835"
     _ref_pattern = re.compile(
-        r"UPI\s+transaction\s+reference\s+number\s+is\s+(?P<ref>\d+)",
+        r"UPI\s+transaction\s+reference\s+(?:number\s+is|no\.?:?)\s+(?P<ref>\d+)",
     )
 
     def parse(self, html: str) -> ParsedEmail:
