@@ -17,6 +17,13 @@ from bank_email_parser.parsers.base import BankParser, BaseEmailParser
 from bank_email_parser.utils import parse_amount, parse_date, parse_datetime
 
 
+def _clean_counterparty(value: str) -> str:
+    cleaned = value.strip()
+    if cleaned.startswith("(") and cleaned.endswith(")"):
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
 class HdfcUpiAlertParser(BaseEmailParser):
     """HDFC Bank UPI transaction alert.
 
@@ -91,7 +98,7 @@ class HdfcUpiAlertParser(BaseEmailParser):
                 direction=direction,
                 amount=Money(amount=amount),
                 transaction_date=parse_date(match.group("date")),
-                counterparty=match.group("counterparty").strip(),
+                counterparty=_clean_counterparty(match.group("counterparty")),
                 account_mask=match.group("account"),
                 reference_number=reference_number,
                 channel="upi",

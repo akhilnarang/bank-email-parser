@@ -921,7 +921,7 @@ class TestHdfcUpiAlertParser:
         assert result.transaction.direction == "debit"
         assert result.transaction.amount.amount == Decimal("5000.00")
         assert result.transaction.account_mask == "1234"
-        assert result.transaction.counterparty == "(Sample Merchant)"
+        assert result.transaction.counterparty == "Sample Merchant"
         assert result.transaction.reference_number == "100200300400"
         assert result.transaction.channel == "upi"
         assert result.transaction.transaction_date is not None
