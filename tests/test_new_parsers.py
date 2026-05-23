@@ -979,6 +979,45 @@ class TestHdfcRupayUpiDebitParser:
         assert result.transaction.counterparty == "merchant@upi"
         assert result.transaction.reference_number == "123456789012"
 
+    def test_parses_credited_to_vpa_variant(self):
+        """Newer RuPay shape: 'is debited ... and credited to VPA x (Merchant)
+        on DD Mon, YYYY.' with a 'reference no.:' label and a spelled-out date."""
+        html = """
+        <html><body>
+        Rs.12.00 is debited from your HDFC Bank RuPay Credit Card ending 1234
+        and credited to VPA merchant.rzp@hdfcbank (Sample Merchant Pvt Ltd) on 19 May, 2026.
+        UPI transaction reference no.: 123456789012
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_rupay_upi_debit"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("12.00")
+        assert result.transaction.card_mask == "1234"
+        assert result.transaction.counterparty == "Sample Merchant Pvt Ltd"
+        assert result.transaction.reference_number == "123456789012"
+        assert result.transaction.channel == "upi"
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 5
+        assert result.transaction.transaction_date.day == 19
+
+    def test_ignores_unrelated_reference_before_upi_ref(self):
+        """A non-UPI 'reference no.:' (e.g. a complaint ref) appearing before the
+        real UPI reference must not be captured as the reference number."""
+        html = """
+        <html><body>
+        Rs.12.00 is debited from your HDFC Bank RuPay Credit Card ending 1234
+        and credited to VPA merchant.rzp@hdfcbank (Sample Merchant Pvt Ltd) on 19 May, 2026.
+        For complaints, quote reference no.: 999999.
+        UPI transaction reference no.: 123456789012
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.transaction.reference_number == "123456789012"
+
 
 class TestYesbankCcDebitAlertParser:
     """Test YES BANK Credit Card debit alert parser with synthetic HTML."""

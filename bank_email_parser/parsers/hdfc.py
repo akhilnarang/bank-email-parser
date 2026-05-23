@@ -279,12 +279,37 @@ class HdfcRupayUpiDebitParser(BaseEmailParser):
         re.DOTALL,
     )
 
-    _ref_pattern = re.compile(r"reference\s+number\s+is\s+(?P<ref>[\d]+)")
+    # Newer variant: "is debited" instead of "has been debited", an explicit
+    # "and credited to VPA <vpa> (<Merchant>)" clause, and a spelled-out
+    # "DD Mon, YYYY" date:
+    #   "Rs.9.00 is debited from your HDFC Bank RuPay Credit Card ending 5854
+    #    and credited to VPA uber1.rzp@hdfcbank (UBER INDIA SYSTEMS PRIVATE
+    #    LIMITED) on 19 May, 2026."
+    _pattern_v2 = re.compile(
+        r"Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"is\s+debited\s+from\s+your\s+HDFC\s+Bank\s+RuPay\s+Credit\s+Card\s+"
+        r"(?:ending\s+)?(?P<card>\S+)\s+"
+        r"and\s+credited\s+to\s+(?:VPA\s+)?(?P<vpa>\S+)\s+"
+        r"(?:\((?P<counterparty>[^)]*)\)\s+)?"
+        r"on\s+(?P<date>\d{1,2}\s+\w{3,9},?\s+\d{4})\.",
+        re.DOTALL,
+    )
+
+    # Reference label varies: "UPI transaction reference number is 123"
+    # (classic) and "UPI transaction reference no.: 123" (newer variant).
+    # Anchored on the "UPI transaction reference" label so an unrelated
+    # "reference no.:" elsewhere in the email is not captured.
+    _ref_pattern = re.compile(
+        r"UPI\s+transaction\s+reference\s+(?:number\s+is|no\.?:?)\s+(?P<ref>\d+)",
+    )
 
     def parse(self, html: str) -> ParsedEmail:
         _, text = self.prepare_html(html)
 
-        if not (match := self._pattern.search(text)):
+        for pattern in (self._pattern, self._pattern_v2):
+            if match := pattern.search(text):
+                break
+        else:
             raise ParseError("Could not parse HDFC RuPay UPI debit alert.")
 
         if (amount := parse_amount(match.group("amount"))) is None:
