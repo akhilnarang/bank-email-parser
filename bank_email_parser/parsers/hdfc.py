@@ -7,6 +7,7 @@ Supported email types:
 - hdfc_cheque_clearing: Cheque clearing notification
 - hdfc_rupay_upi_debit: RuPay credit card UPI debit
 - hdfc_imps_alert: IMPS transfer alert
+- hdfc_account_transfer_debit_alert: Savings-to-PPF/SSY transfer debit
 """
 
 import re
@@ -387,6 +388,55 @@ class HdfcImpsAlertParser(BaseEmailParser):
         )
 
 
+class HdfcAccountTransferDebitParser(BaseEmailParser):
+    """HDFC savings-to-PPF/SSY transfer debit alert.
+
+    Matches: 'You have transferred Rs. 1,00,000.00 to your PPF/Sukanya
+    Samriddhi Yojana Account No. ending with XX0000 from your A/c No. XX1111,
+    through Online Banking on 05-06-2026.'
+
+    Money leaves the savings account into the user's own PPF/SSY account over
+    Online Banking, so ``direction`` is ``debit`` and ``channel`` is
+    ``online``. The source A/c is the ``account_mask``; the destination
+    PPF/SSY account is the ``counterparty``.
+    """
+
+    bank = "hdfc"
+    email_type = "hdfc_account_transfer_debit_alert"
+
+    _pattern = re.compile(
+        r"You\s+have\s+transferred\s+Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"to\s+your\s+PPF/Sukanya\s+Samriddhi\s+Yojana\s+Account\s+No\.\s+"
+        r"ending\s+with\s+(?P<dest>\w+)\s+"
+        r"from\s+your\s+A/c\s+No\.\s+(?P<account>\w+)\s*,?\s*"
+        r"through\s+Online\s+Banking\s+on\s+(?P<date>[\d\-]+)",
+        re.DOTALL,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse HDFC account transfer debit alert.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                transaction_date=parse_date(match.group("date")),
+                counterparty=f"PPF/SSY A/c {match.group('dest')}",
+                account_mask=match.group("account"),
+                channel="online",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class HdfcStatementEmailParser(BaseEmailParser):
     """HDFC account statement email."""
 
@@ -416,6 +466,7 @@ _PARSERS = (
     HdfcChequeClearingParser(),
     HdfcRupayUpiDebitParser(),
     HdfcImpsAlertParser(),
+    HdfcAccountTransferDebitParser(),
     HdfcStatementEmailParser(),
 )
 

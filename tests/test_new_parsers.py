@@ -1019,6 +1019,38 @@ class TestHdfcRupayUpiDebitParser:
         assert result.transaction.reference_number == "123456789012"
 
 
+class TestHdfcAccountTransferDebitParser:
+    """HDFC savings-to-PPF/SSY transfer debit email."""
+
+    SAMPLE_HTML = """
+    <html><body>
+    Dear Customer,
+    Thank you for banking with HDFC Bank.
+    You have transferred Rs. 1,00,000.00 to your PPF/Sukanya Samriddhi Yojana
+    Account No. ending with XX0000 from your A/c No. XX1111, through Online
+    Banking on 05-06-2026.
+    Not you? Call 18002586161
+    Warm Regards, HDFC Bank
+    </body></html>
+    """
+
+    def test_parses_ppf_transfer_debit(self):
+        result = parse_email("hdfc", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_account_transfer_debit_alert"
+        assert result.bank == "hdfc"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("100000.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.account_mask == "XX1111"
+        assert result.transaction.counterparty == "PPF/SSY A/c XX0000"
+        assert result.transaction.channel == "online"
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 6
+        assert result.transaction.transaction_date.day == 5
+
+
 class TestYesbankCcDebitAlertParser:
     """Test YES BANK Credit Card debit alert parser with synthetic HTML."""
 
