@@ -8,6 +8,48 @@ from bank_email_parser.parsers.base import BaseEmailParser
 from bank_email_parser.utils import parse_amount
 
 
+def _extract_labeled_grid_value(soup, label: str) -> str | None:
+    """Read a value from Kotak's labeled detail grid.
+
+    The grid is a header row of ``<th>`` labels (``Transaction ID``,
+    ``Amount in ₹``, ``Status``) followed by a row of ``<td>`` values, aligned
+    by column. Match the header cell whose text *equals* ``label`` (case-
+    insensitive), then return the value in the same column of the next row.
+
+    Equality — not substring — is deliberate: the template wraps the whole
+    body in nested tables, so a substring scan matches the outer wrapper row
+    and returns boilerplate ("If you are unable to view ... click here")
+    instead of the real value.
+    """
+    target = label.strip().lower()
+    rows = soup.find_all("tr")
+    for i, row in enumerate(rows):
+        # Direct-child cells only: a recursive scan makes an outer wrapper
+        # row absorb the nested grid's cells, so the label would be found in
+        # the wrapper row at the wrong column and the "next row" lookup would
+        # read a sibling label instead of the value.
+        cells = row.find_all(["td", "th"], recursive=False)
+        col = next(
+            (
+                j
+                for j, c in enumerate(cells)
+                if c.get_text(strip=True).lower() == target
+            ),
+            None,
+        )
+        if col is None:
+            continue
+        for next_row in rows[i + 1 :]:
+            value_cells = next_row.find_all(["td", "th"], recursive=False)
+            if col < len(value_cells):
+                value = value_cells[col].get_text(strip=True)
+                return value or None
+            # A shorter following row (e.g. a rowspan'd Status-only row)
+            # doesn't reach this column — keep looking.
+        return None
+    return None
+
+
 class KotakDigitalTransactionParser(BaseEmailParser):
     """Kotak811 digital transaction (minimal data)."""
 
@@ -27,14 +69,7 @@ class KotakDigitalTransactionParser(BaseEmailParser):
         if (amount := parse_amount(match.group("amount"))) is None:
             raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
 
-        reference_number = None
-        for row in soup.find_all("tr"):
-            cells = row.find_all(["td", "th"])
-            if len(cells) >= 2:
-                header = cells[0].get_text(strip=True).lower()
-                if "transaction id" in header:
-                    reference_number = cells[1].get_text(strip=True)
-                    break
+        reference_number = _extract_labeled_grid_value(soup, "transaction id")
 
         return ParsedEmail(
             email_type=self.email_type,

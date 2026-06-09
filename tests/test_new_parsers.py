@@ -1712,3 +1712,62 @@ class TestOnecardCcStatementParser:
         assert result.statement.total_amount_due is not None
         assert result.statement.minimum_amount_due is None
         assert result.statement.due_date is not None
+
+
+class TestKotakDigitalTransactionParser:
+    """Kotak "Transaction Successful" digital debit, matching the real
+    Kotak Mahindra Bank email layout: a labeled three-column grid
+    (Transaction ID | Amount in ₹ | Status) whose value cells live in the
+    following table row. The outer template wraps the whole body in nested
+    tables; the value row uses rowspan so Status sits in a separate <tr>.
+    """
+
+    SAMPLE_HTML = """
+    <html><body>
+    <table width="100%"><tbody><tr><td>
+      <p>If you are unable to view the below e-mailer, please<a href="#">click here</a>.</p>
+      <p>Hello SAMPLE CUSTOMER,</p>
+      <p>Your transaction of &#8377; 7777.00 has been processed successfully.</p>
+      <p>Please find the transaction details as mentioned below:</p>
+      <table width="600"><tbody>
+        <tr>
+          <th>Transaction ID</th>
+          <th>Amount in &#8377;</th>
+          <th>Status</th>
+        </tr>
+        <tr>
+          <td rowspan="2">999000111222</td>
+          <td rowspan="2">7777.00</td>
+        </tr>
+        <tr>
+          <td>SUCCESS</td>
+        </tr>
+      </tbody></table>
+      <p>Warm regards,<br>Kotak Mahindra Bank</p>
+    </td></tr></tbody></table>
+    </body></html>
+    """
+
+    def test_routes_to_digital_parser(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "kotak_digital_transaction"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("7777.00")
+
+    def test_extracts_real_transaction_id_not_boilerplate(self):
+        # Regression: the table scrape used to grab the first <tr> whose
+        # cell contained "transaction id" — in the real nested template that
+        # is the outer wrapper row, so reference_number became the
+        # "If you are unable to view ... click here" boilerplate. Every
+        # digital debit then shared that identical ref and collided on the
+        # (bank, reference_number, direction) merge key, swallowing distinct
+        # transactions into one row.
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction.reference_number == "999000111222"
+
+    def test_never_emits_boilerplate_as_reference(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        ref = result.transaction.reference_number or ""
+        assert "unable to view" not in ref.lower()
+        assert "click here" not in ref.lower()
