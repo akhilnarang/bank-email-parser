@@ -94,8 +94,10 @@ class Kotak811TransactionParser(BaseEmailParser):
         r"has\s+been\s+processed\s+successfully",
         re.IGNORECASE,
     )
+    # Constrain the token to an alphanumeric run so glued punctuation or
+    # boilerplate after "Transaction ID:" cannot leak into the reference.
     _txn_id_pattern = re.compile(
-        r"Transaction\s+ID\s*:\s*(?P<txn_id>\S+)",
+        r"Transaction\s+ID\s*:\s*(?P<txn_id>[A-Za-z0-9]+)",
         re.IGNORECASE,
     )
 

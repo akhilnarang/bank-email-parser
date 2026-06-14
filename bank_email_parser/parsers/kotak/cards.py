@@ -135,8 +135,10 @@ class KotakCardRefundParser(BaseEmailParser):
         r"against\s+your\s+recent\s+Debit\s+Card\s+transaction",
         re.IGNORECASE,
     )
+    # An RRN is numeric (canonically 12 digits). Require digits so boilerplate
+    # like "RRN means Retrieval Reference Number" cannot capture a word.
     _rrn_pattern = re.compile(
-        r"RRN\s+(?P<rrn>\w+)",
+        r"RRN\s+(?P<rrn>\d{6,})",
         re.IGNORECASE,
     )
     _footer_date_pattern = re.compile(

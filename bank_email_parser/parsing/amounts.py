@@ -1,13 +1,18 @@
 """Amount and currency parsing helpers."""
 
+import re
 from decimal import Decimal, InvalidOperation
 
 from bank_email_parser.models import Money
 
+# Currency prefixes/symbols stripped before parsing. ``INR``/``Rs``/``Rs.`` are
+# matched case-insensitively with an optional trailing separator.
+_CURRENCY_RE = re.compile(r"(?:₹|INR|Rs\.?)\s*", re.IGNORECASE)
+
 
 def parse_amount(raw: str) -> Decimal | None:
-    """Parse an amount string like '₹57,055.44' into Decimal."""
-    cleaned = raw.replace("₹", "").replace("Rs.", "").replace("Rs", "")
+    """Parse an amount string like '₹57,055.44' or 'INR 5,000.00' into Decimal."""
+    cleaned = _CURRENCY_RE.sub("", raw)
     cleaned = cleaned.replace(",", "").replace("\xa0", "").replace("\u200c", "")
     cleaned = cleaned.strip()
     try:

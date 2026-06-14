@@ -1,6 +1,5 @@
 """Base parser class and fallback-chain dispatcher for bank email parsers."""
 
-import copy
 import threading
 import warnings
 from abc import ABC, abstractmethod
@@ -60,13 +59,17 @@ class BaseEmailParser(ABC):
 
         Uses thread-local storage so that concurrent calls to
         ``parse_with_parsers`` do not interfere with each other.
+
+        The returned soup is the shared cached instance: callers must treat
+        it as read-only and must not mutate the tree (no ``decompose``,
+        ``extract``, ``insert``, etc.). A parser that needs to mutate the DOM
+        should build its own soup with ``BeautifulSoup(html, ...)``.
         """
         context: ParserContext | None = getattr(_thread_local, "parser_context", None)
         if context is not None and (context.html is html or context.html == html):
             if context.prepared_email is None:
                 context.prepared_email = self._build_prepared_email(html)
-            cached_soup, cached_text = context.prepared_email
-            return copy.copy(cached_soup), cached_text
+            return context.prepared_email
         return self._build_prepared_email(html)
 
     @abstractmethod

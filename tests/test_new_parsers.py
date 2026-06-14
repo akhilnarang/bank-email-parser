@@ -52,6 +52,21 @@ class TestKotak811TransactionParser:
         assert result.transaction.amount.amount == Decimal("12345.00")
         assert result.transaction.reference_number == "Cd4Za8LpR6TuV1w357XyQ9"
 
+    def test_transaction_id_stops_at_punctuation(self):
+        # The token after "Transaction ID:" must be a clean alphanumeric run;
+        # trailing punctuation/boilerplate must not leak into the reference.
+        html = """
+        <html><body>
+        <table>
+          <tr><td>Your transaction for INR 4321.00 has been processed successfully.</td></tr>
+          <tr><td>Transaction ID: Ab3Xy7MnP5QrS9t246, please retain this for your records.</td></tr>
+        </table>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.transaction.reference_number == "Ab3Xy7MnP5QrS9t246"
+
 
 class TestKotakCcBillPaidParser:
     """Test KotakCcBillPaidParser with synthetic HTML matching the observed format."""
@@ -1250,7 +1265,7 @@ class TestKotakCardRefundParser:
         html = """
         <html><body>
         <p>The amount of Rs. 500.00 has been credited to your Kotak Bank Account XX9988
-        against your recent Debit Card transaction with RRN ABC123456.</p>
+        against your recent Debit Card transaction with RRN 123456789012.</p>
         </body></html>
         """
         result = parse_email("kotak", html)
@@ -1258,7 +1273,7 @@ class TestKotakCardRefundParser:
         assert result.email_type == "kotak_card_refund"
         assert result.transaction.amount.amount == Decimal("500.00")
         assert result.transaction.account_mask == "XX9988"
-        assert result.transaction.reference_number == "ABC123456"
+        assert result.transaction.reference_number == "123456789012"
         assert result.transaction.transaction_date is None
         assert result.transaction.transaction_time is None
 
@@ -1283,6 +1298,35 @@ class TestKotakCardRefundParser:
         result = parse_email("kotak", html)
         assert result.transaction is not None
         assert result.transaction.amount.amount == Decimal("100000.00")
+
+    def test_captures_numeric_rrn_not_boilerplate(self):
+        # The email defines what an RRN is before stating the real one; the
+        # numeric-only pattern must skip the "RRN means ..." prose and capture
+        # the actual reference.
+        html = """
+        <html><body>
+        <p>RRN means Retrieval Reference Number, a unique identifier.</p>
+        <p>The amount of Rs. 24.00 has been credited to your Kotak Bank Account XX1234
+        against your recent Debit Card transaction with RRN 345678901234.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.transaction.reference_number == "345678901234"
+
+    def test_boilerplate_only_yields_no_garbage_ref(self):
+        # No labeled numeric RRN present — the reference must stay None rather
+        # than capturing a boilerplate word like "means".
+        html = """
+        <html><body>
+        <p>RRN means Retrieval Reference Number.</p>
+        <p>The amount of Rs. 24.00 has been credited to your Kotak Bank Account XX1234
+        against your recent Debit Card transaction.</p>
+        </body></html>
+        """
+        result = parse_email("kotak", html)
+        assert result.transaction is not None
+        assert result.transaction.reference_number is None
 
 
 class TestKotakCreditCardPaymentParser:
@@ -1764,10 +1808,12 @@ class TestKotakDigitalTransactionParser:
         # (bank, reference_number, direction) merge key, swallowing distinct
         # transactions into one row.
         result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
         assert result.transaction.reference_number == "999000111222"
 
     def test_never_emits_boilerplate_as_reference(self):
         result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
         ref = result.transaction.reference_number or ""
         assert "unable to view" not in ref.lower()
         assert "click here" not in ref.lower()
