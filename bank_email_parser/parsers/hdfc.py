@@ -8,6 +8,7 @@ Supported email types:
 - hdfc_rupay_upi_debit: RuPay credit card UPI debit
 - hdfc_imps_alert: IMPS transfer alert
 - hdfc_account_transfer_debit_alert: Savings-to-PPF/SSY transfer debit
+- hdfc_account_credit_alert: Savings-account inbound NEFT credit
 """
 
 import re
@@ -437,6 +438,65 @@ class HdfcAccountTransferDebitParser(BaseEmailParser):
         )
 
 
+class HdfcAccountCreditAlertParser(BaseEmailParser):
+    """HDFC savings/current-account inbound NEFT credit alert.
+
+    Matches the "You have received a credit" deposit email:
+      'Amount received: INR 100.00  Account: XX0000  Date: 29-JUN-2026
+       Reference Details: NEFT Cr-<route>-<remitter>-<beneficiary>-<UTR>
+       Available Balance: INR 200.00'
+
+    The NEFT reference is structured ``<route>-<remitter>-<beneficiary>
+    -<UTR>``. The remitter (first dash-segment after the route code) is the
+    counterparty; the beneficiary is the user. ``channel`` is ``neft``.
+    """
+
+    bank = "hdfc"
+    email_type = "hdfc_account_credit_alert"
+
+    _pattern = re.compile(
+        r"Amount\s+received:\s*INR\s+(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"Account:\s*(?P<account>\w+)\s+"
+        r"Date:\s*(?P<date>\d{1,2}-[A-Za-z]+-\d{4})\s+"
+        # Reference is "<route>-<remitter>-<beneficiary>-<UTR>". Route is a
+        # hyphen-free code and the UTR is a hyphen-free token; the remitter
+        # is captured greedily so a hyphenated remitter name (e.g.
+        # "STATE-BANK") stays intact, leaving the single-segment beneficiary
+        # (the user) and the UTR pinned to the right.
+        r"Reference\s+Details:\s*NEFT\s+Cr-(?P<route>[^-]+)-"
+        r"(?P<counterparty>.+)-(?P<beneficiary>[^-]+)-(?P<ref>[^-\s]+)\s+"
+        r"Available\s+Balance:\s*INR\s+(?P<balance>[\d,]+(?:\.\d+)?)",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse HDFC account credit alert.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        balance = parse_amount(match.group("balance"))
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount),
+                transaction_date=parse_date(match.group("date")),
+                counterparty=match.group("counterparty").strip(),
+                account_mask=match.group("account"),
+                reference_number=match.group("ref").strip(),
+                balance=Money(amount=balance) if balance is not None else None,
+                channel="neft",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class HdfcStatementEmailParser(BaseEmailParser):
     """HDFC account statement email."""
 
@@ -467,6 +527,7 @@ _PARSERS = (
     HdfcRupayUpiDebitParser(),
     HdfcImpsAlertParser(),
     HdfcAccountTransferDebitParser(),
+    HdfcAccountCreditAlertParser(),
     HdfcStatementEmailParser(),
 )
 

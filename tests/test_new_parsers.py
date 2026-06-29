@@ -1066,6 +1066,65 @@ class TestHdfcAccountTransferDebitParser:
         assert result.transaction.transaction_date.day == 5
 
 
+class TestHdfcAccountCreditAlertParser:
+    """HDFC savings-account inbound NEFT credit email.
+
+    "You have received a credit ... Amount received / Account / Date /
+    Reference Details: NEFT Cr-<route>-<remitter>-<beneficiary>-<UTR>".
+    Counterparty is the remitter.
+    """
+
+    SAMPLE_HTML = """
+    <html><body>
+    HDFC BANK Dear Customer,
+    You have received a credit in your HDFC Bank account.
+    Details of the transaction:
+    Amount received: INR 100.00
+    Account: XX0000
+    Date: 29-JUN-2026
+    Reference Details: NEFT Cr-SAMPLE0INBX01-Sample Remitter Inc-Customer Name-SAMPLEH00000000000
+    Available Balance: INR 200.00
+    Thank you for banking with HDFC Bank. Warm Regards, HDFC Bank
+    </body></html>
+    """
+
+    def test_parses_neft_credit(self):
+        result = parse_email("hdfc", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_account_credit_alert"
+        assert result.bank == "hdfc"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("100.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.account_mask == "XX0000"
+        assert result.transaction.counterparty == "Sample Remitter Inc"
+        assert result.transaction.channel == "neft"
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("200.00")
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 6
+        assert result.transaction.transaction_date.day == 29
+
+    def test_hyphenated_remitter_stays_intact(self):
+        html = """
+        <html><body>
+        You have received a credit in your HDFC Bank account.
+        Amount received: INR 100.00
+        Account: XX0000
+        Date: 29-JUN-2026
+        Reference Details: NEFT Cr-SAMPLE0INBX01-State-Bank Remitter-Customer Name-SAMPLEH00000000000
+        Available Balance: INR 200.00
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.transaction.counterparty == "State-Bank Remitter"
+        assert result.transaction.reference_number == "SAMPLEH00000000000"
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("200.00")
+
+
 class TestYesbankCcDebitAlertParser:
     """Test YES BANK Credit Card debit alert parser with synthetic HTML."""
 
