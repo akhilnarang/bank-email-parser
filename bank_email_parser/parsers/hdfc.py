@@ -117,6 +117,11 @@ class HdfcCardDebitAlertParser(BaseEmailParser):
            towards SAMPLE MERCHANT on 15 Jan, 2026 at 10:30:00.'
       DC: 'Rs.2000.00 is debited from your HDFC Bank Debit Card ending 5678
            at SAMPLE STORE on 15 Jan, 2026 at 11:00:00.'
+    and the newer "We noticed a transaction on your Credit Card" wording
+    (observed July 2026):
+      'Thank you for using your HDFC Bank Credit Card ending in 1234 .You
+       made a transaction of Rs. 422.00 at SAMPLE MERCHANT on 06-07-2026
+       17:18:47 . Authorization code: 123456'
     """
 
     bank = "hdfc"
@@ -131,10 +136,29 @@ class HdfcCardDebitAlertParser(BaseEmailParser):
         r"at\s+(?P<time>\d{2}:\d{2}:\d{2})\s*\.",
     )
 
+    # Newer wording puts the card first and the amount second, uses a
+    # numeric "DD-MM-YYYY HH:MM:SS" timestamp, and pads periods with a
+    # space ("ending in 1234 .You made a transaction ... 17:18:47 .").
+    _pattern_v2 = re.compile(
+        r"HDFC\s+Bank\s+(?P<card_type>Credit|Debit)\s+Card\s+"
+        r"ending\s+in\s+(?P<card>\d{4})\s*\.\s*"
+        r"You\s+made\s+a\s+transaction\s+of\s+"
+        r"Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"at\s+(?P<merchant>.+?)\s+"
+        r"on\s+(?P<date>\d{1,2}-\d{1,2}-\d{4})\s+"
+        r"(?P<time>\d{2}:\d{2}:\d{2})\s*\.",
+    )
+
+    # Only the newer wording carries one; harmless no-match on classic.
+    _auth_code_pattern = re.compile(r"Authorization\s+code\s*:\s*(?P<code>\w+)")
+
     def parse(self, html: str) -> ParsedEmail:
         _, text = self.prepare_html(html)
 
-        if not (match := self._pattern.search(text)):
+        for pattern in (self._pattern, self._pattern_v2):
+            if match := pattern.search(text):
+                break
+        else:
             raise ParseError("Could not parse HDFC card debit alert.")
 
         if (amount := parse_amount(match.group("amount"))) is None:
@@ -142,6 +166,10 @@ class HdfcCardDebitAlertParser(BaseEmailParser):
 
         date_time_str = f"{match.group('date')} at {match.group('time')}"
         txn_dt = parse_datetime(date_time_str)
+
+        reference_number = None
+        if auth_match := self._auth_code_pattern.search(text):
+            reference_number = auth_match.group("code")
 
         return ParsedEmail(
             email_type=self.email_type,
@@ -153,6 +181,7 @@ class HdfcCardDebitAlertParser(BaseEmailParser):
                 transaction_time=txn_dt.time() if txn_dt else None,
                 counterparty=match.group("merchant").strip(),
                 card_mask=match.group("card"),
+                reference_number=reference_number,
                 channel="card",
                 raw_description=match.group(0).strip(),
             ),
@@ -164,13 +193,16 @@ class HdfcReversalAlertParser(BaseEmailParser):
 
     Matches: 'Transaction reversal of Rs.1500.00 has been initiated to your
     HDFC Bank Credit Card ending 1234. From Merchant: ... Date Time: ...'
+    and the newer refund wording that embeds the phrase mid-sentence with a
+    lowercase 't': 'A transaction reversal of Rs. 2.00 has been initiated
+    to your HDFC Bank Credit Card ending 1234 From Merchant: ...'
     """
 
     bank = "hdfc"
     email_type = "hdfc_reversal_alert"
 
     _amount_pattern = re.compile(
-        r"Transaction\s+reversal\s+of\s+Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"[Tt]ransaction\s+reversal\s+of\s+Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
         r"has\s+been\s+initiated\s+to\s+your\s+HDFC\s+Bank\s+"
         r"(?:Credit|Debit)\s+Card\s+ending\s+(?P<card>\d{4})",
     )

@@ -1125,6 +1125,127 @@ class TestHdfcAccountCreditAlertParser:
         assert result.transaction.balance.amount == Decimal("200.00")
 
 
+class TestHdfcCardDebitAlertParser:
+    """HDFC credit/debit card transaction alerts.
+
+    Two wordings coexist in production. The classic format reads
+    ``Rs.X is debited from your HDFC Bank Credit Card ending 1234 towards
+    MERCHANT on DD Mon, YYYY at HH:MM:SS.``. The newer "We noticed a
+    transaction on your Credit Card" email (observed July 2026) reads
+    ``Thank you for using your HDFC Bank Credit Card ending in 1234 .You
+    made a transaction of Rs. X at MERCHANT on DD-MM-YYYY HH:MM:SS .
+    Authorization code: NNNNNN``. Both must parse.
+    """
+
+    def test_parses_classic_cc_debit(self):
+        html = """
+        <html><body>
+        Rs.1500.00 is debited from your HDFC Bank Credit Card ending 4242
+        towards SAMPLE MERCHANT on 15 Jan, 2026 at 10:30:00.
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_card_debit_alert"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("1500.00")
+        assert result.transaction.card_mask == "4242"
+        assert result.transaction.counterparty == "SAMPLE MERCHANT"
+        assert result.transaction.channel == "card"
+
+    def test_parses_new_you_made_a_transaction_format(self):
+        """The July-2026 wording differs from the classic one in every
+        anchor: 'Credit Card ending in 4242 .You made a transaction of
+        Rs. X at MERCHANT on DD-MM-YYYY HH:MM:SS .' with a stray space
+        before each period and no space after 'ending in 4242 .'. It
+        also carries an authorization code instead of a reference."""
+        html = """
+        <html><body>
+        Dear Customer, Greetings from HDFC Bank. Thank you for using your
+        HDFC Bank Credit Card ending in 4242 .You made a transaction of
+        Rs. 422.00 at RAZ*SampleMart on 06-07-2026 17:18:47 .
+        Authorization code: 123456
+        Important Note: If you did not do this transaction, please act immediately.
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_card_debit_alert"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("422.00")
+        assert result.transaction.card_mask == "4242"
+        assert result.transaction.counterparty == "RAZ*SampleMart"
+        assert result.transaction.reference_number == "123456"
+        assert result.transaction.channel == "card"
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 7
+        assert result.transaction.transaction_date.day == 6
+        assert result.transaction.transaction_time is not None
+        assert result.transaction.transaction_time.hour == 17
+        assert result.transaction.transaction_time.minute == 18
+        assert result.transaction.transaction_time.second == 47
+
+
+class TestHdfcReversalAlertParser:
+    """HDFC card transaction reversal/refund alerts.
+
+    The classic wording starts the sentence with a capitalised
+    ``Transaction reversal of Rs.X``; the newer refund email (observed
+    July 2026) reads ``A transaction reversal of Rs. X has been
+    initiated ...`` mid-sentence, so the match must be case-tolerant.
+    """
+
+    def test_parses_classic_reversal(self):
+        html = """
+        <html><body>
+        Transaction reversal of Rs.1500.00 has been initiated to your
+        HDFC Bank Credit Card ending 4242.
+        From Merchant: SAMPLE MERCHANT
+        Date Time: 15 Jan, 2026 at 10:30:00
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_reversal_alert"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("1500.00")
+        assert result.transaction.card_mask == "4242"
+        assert result.transaction.counterparty == "SAMPLE MERCHANT"
+
+    def test_parses_lowercase_a_transaction_reversal_variant(self):
+        """Newer refund email embeds the phrase mid-sentence with a
+        lowercase 't' and a space after 'Rs.': 'A transaction reversal
+        of Rs. 2.00 has been initiated to your HDFC Bank Credit Card
+        ending 4242 From Merchant: ...'."""
+        html = """
+        <html><body>
+        Dear Customer, Greetings from HDFC Bank!
+        A transaction reversal of Rs. 2.00 has been initiated to your
+        HDFC Bank Credit Card ending 4242
+        From Merchant: SAMPLEPAY
+        Date Time: 06 Jul, 2026 at 17:23:32
+        Please allow up to 48 hours for the reversal to reflect in your card statement.
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_reversal_alert"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("2.00")
+        assert result.transaction.card_mask == "4242"
+        assert result.transaction.counterparty == "SAMPLEPAY"
+        assert result.transaction.channel == "card"
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 7
+        assert result.transaction.transaction_date.day == 6
+        assert result.transaction.transaction_time is not None
+        assert result.transaction.transaction_time.hour == 17
+        assert result.transaction.transaction_time.minute == 23
+        assert result.transaction.transaction_time.second == 32
+
+
 class TestYesbankCcDebitAlertParser:
     """Test YES BANK Credit Card debit alert parser with synthetic HTML."""
 
