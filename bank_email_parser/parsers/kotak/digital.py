@@ -51,7 +51,17 @@ def _extract_labeled_grid_value(soup, label: str) -> str | None:
 
 
 class KotakDigitalTransactionParser(BaseEmailParser):
-    """Kotak811 digital transaction (minimal data)."""
+    """Kotak811 digital transaction (minimal data).
+
+    The "Transaction Successful" template carries no direction, account
+    mask, or counterparty — only amount, transaction ID, and status.
+    Every observed instance (Feb/May/Jun/Jul 2026) was the add-money /
+    self-transfer flow moving money INTO the Kotak account, and Kotak's
+    outgoing debits arrive under dedicated templates ("Card transaction -
+    successful", "Credit Card bill paid successfully!"), so this parses
+    as a credit. The monthly bank statement reconciles on
+    (date, amount, direction) and acts as the safety net.
+    """
 
     bank = "kotak"
     email_type = "kotak_digital_transaction"
@@ -75,7 +85,7 @@ class KotakDigitalTransactionParser(BaseEmailParser):
             email_type=self.email_type,
             bank=self.bank,
             transaction=TransactionAlert(
-                direction="debit",
+                direction="credit",
                 amount=Money(amount=amount),
                 reference_number=reference_number,
                 raw_description=match.group(0).strip(),

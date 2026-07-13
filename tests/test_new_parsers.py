@@ -1939,11 +1939,17 @@ class TestOnecardCcStatementParser:
 
 
 class TestKotakDigitalTransactionParser:
-    """Kotak "Transaction Successful" digital debit, matching the real
+    """Kotak "Transaction Successful" digital transaction, matching the real
     Kotak Mahindra Bank email layout: a labeled three-column grid
     (Transaction ID | Amount in ₹ | Status) whose value cells live in the
     following table row. The outer template wraps the whole body in nested
     tables; the value row uses rowspan so Status sits in a separate <tr>.
+
+    Direction is credit: every observed instance of this template
+    (Feb/May/Jun/Jul 2026) accompanied money moving INTO the Kotak account
+    via the 811 add-money / self-transfer flow, while Kotak's outgoing
+    debits arrive under dedicated templates ("Card transaction -
+    successful", "Credit Card bill paid successfully!").
     """
 
     SAMPLE_HTML = """
@@ -1976,7 +1982,7 @@ class TestKotakDigitalTransactionParser:
         result = parse_email("kotak", self.SAMPLE_HTML)
         assert result.transaction is not None
         assert result.email_type == "kotak_digital_transaction"
-        assert result.transaction.direction == "debit"
+        assert result.transaction.direction == "credit"
         assert result.transaction.amount.amount == Decimal("7777.00")
 
     def test_extracts_real_transaction_id_not_boilerplate(self):
