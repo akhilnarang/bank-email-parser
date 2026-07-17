@@ -1,11 +1,13 @@
 """Tests for newly added parsers: Kotak811 Transaction, Kotak CC Bill Paid,
 ICICI CC Reversal, and Axis NEFT (stub)."""
 
+from datetime import date, time
 from decimal import Decimal
 
 import pytest
 from bank_email_parser.api import parse_email
 from bank_email_parser.exceptions import ParseError
+from bank_email_parser.parsers.axis import AxisCcDebitAlertParser, AxisCcReversalParser
 
 
 class TestKotak811TransactionParser:
@@ -666,6 +668,410 @@ class TestIciciCcReversalParser:
         html = "<html><body>Some unrelated ICICI content</body></html>"
         with pytest.raises(ParseError):
             parse_email("icici", html)
+
+
+def _axis_cc_card_html(rows: list[tuple[str, str]]) -> str:
+    """Build the Axis CC label/value card layout from (label, value) pairs.
+
+    All data here is synthetic.
+    """
+    divs = "".join(
+        f'<div style="font-size:12px;color:#777777;">{label}</div>'
+        f'<div style="font-size:14px;color:#333333;">{value}</div>'
+        for label, value in rows
+    )
+    return f"<html><body><table><tr><td>{divs}</td></tr></table></body></html>"
+
+
+AXIS_CC_SPEND_HTML = _axis_cc_card_html(
+    [
+        ("Transaction Amount:", "INR 58210"),
+        ("Merchant Name:", "SAMPLEMART ONLINE"),
+        ("Axis Bank Credit Card No.", "XX4023"),
+        ("Date &amp; Time:", "12-02-2026, 11:05:00 IST"),
+        ("Available Limit*:", "INR 240100"),
+        ("Total Credit Limit*:", "INR 300000"),
+    ]
+)
+
+AXIS_CC_REVERSAL_HTML = _axis_cc_card_html(
+    [
+        ("Transaction Amount:", "INR 58210"),
+        ("Merchant Name:", "SAMPLEMART ONLINE"),
+        ("Axis Bank Credit Card No.", "XX4023"),
+        ("Date &amp; Time:", "12-02-26, 18:22:10 IST"),
+        ("Transaction Status:", "REVERSED"),
+    ]
+)
+
+
+AXIS_CC_BLANK_STATUS_HTML = _axis_cc_card_html(
+    [
+        ("Transaction Amount:", "INR 58210"),
+        ("Merchant Name:", "SAMPLEMART ONLINE"),
+        ("Axis Bank Credit Card No.", "XX4023"),
+        ("Date &amp; Time:", "12-02-26, 18:22:10 IST"),
+        ("Transaction Status:", ""),
+    ]
+)
+
+
+class TestAxisCcStatusLabelVariants:
+    """The status field decides the sign, so it must survive benign markup
+    variation, and must fail closed when it is visibly present but unreadable.
+
+    Every body here would have parsed as axis_cc_debit_alert/debit before the
+    extractor tracked label presence apart from value extraction.
+    """
+
+    def test_value_inside_intervening_wrapper_div(self):
+        """Load-bearing: status present, value nested one level deeper.
+
+        The value is readable, so this is a reversal, not a refusal.
+        """
+        html = (
+            "<html><body><table><tr><td>"
+            '<div style="color:#777777;">Transaction Amount:</div>'
+            '<div style="color:#333333;">INR 7310</div>'
+            '<div style="color:#777777;">Merchant Name:</div>'
+            '<div style="color:#333333;">SAMPLEMART ONLINE</div>'
+            '<div style="color:#777777;">Transaction Status:</div>'
+            '<div><span><div style="color:#333333;">REVERSED</div></span></div>'
+            "</td></tr></table></body></html>"
+        )
+        result = parse_email("axis", html)
+        assert result.transaction is not None
+        assert result.email_type == "axis_cc_reversal"
+        assert result.transaction.direction == "credit"
+
+    def test_nbsp_in_status_label(self):
+        """Load-bearing: the label reads 'Transaction&nbsp;Status:'.
+
+        Label whitespace is normalized, so the field is still recognized and
+        the body routes to a credit.
+        """
+        html = _axis_cc_card_html(
+            [
+                ("Transaction Amount:", "INR 7310"),
+                ("Merchant Name:", "SAMPLEMART ONLINE"),
+                ("Transaction&nbsp;Status:", "REVERSED"),
+            ]
+        )
+        result = parse_email("axis", html)
+        assert result.transaction is not None
+        assert result.email_type == "axis_cc_reversal"
+        assert result.transaction.direction == "credit"
+
+    def test_spaced_style_declaration_on_status_label(self):
+        """Load-bearing: status label styled 'color: #777777' with a space.
+
+        Only the status pair is spaced; the amount and merchant use the tight
+        form. That combination is the dangerous one — with the amount still
+        readable, the body parses cleanly and the unseen status silently
+        yields a debit. Spacing every style instead would abort on the missing
+        amount and mask the sign inversion behind an unrelated error.
+        """
+        html = (
+            "<html><body><table><tr><td>"
+            '<div style="color:#777777;">Transaction Amount:</div>'
+            '<div style="color:#333333;">INR 7310</div>'
+            '<div style="color:#777777;">Merchant Name:</div>'
+            '<div style="color:#333333;">SAMPLEMART ONLINE</div>'
+            '<div style="color: #777777;">Transaction Status:</div>'
+            '<div style="color: #333333;">REVERSED</div>'
+            "</td></tr></table></body></html>"
+        )
+        result = parse_email("axis", html)
+        assert result.transaction is not None
+        assert result.email_type == "axis_cc_reversal"
+        assert result.transaction.direction == "credit"
+
+    def test_status_label_with_no_value_sibling_fails_closed(self):
+        """Load-bearing: the status label is the last node, so it has no value.
+
+        The label is visible but unreadable. That is not a spend; it is a body
+        we do not understand, and inferring 'debit' from it would book the
+        wrong sign silently.
+        """
+        html = (
+            "<html><body><table><tr><td>"
+            '<div style="color:#777777;">Transaction Amount:</div>'
+            '<div style="color:#333333;">INR 7310</div>'
+            '<div style="color:#777777;">Transaction Status:</div>'
+            "</td></tr></table></body></html>"
+        )
+        with pytest.raises(ParseError):
+            parse_email("axis", html)
+
+    def test_status_value_in_unrecognized_style_fails_closed(self):
+        """Load-bearing: status label present, value div styled unrecognizably."""
+        html = (
+            "<html><body><table><tr><td>"
+            '<div style="color:#777777;">Transaction Amount:</div>'
+            '<div style="color:#333333;">INR 7310</div>'
+            '<div style="color:#777777;">Transaction Status:</div>'
+            '<div style="color:#0a0a0a;">REVERSED</div>'
+            "</td></tr></table></body></html>"
+        )
+        with pytest.raises(ParseError):
+            parse_email("axis", html)
+
+    def test_status_label_split_across_inline_markup(self):
+        """Load-bearing: label text broken by a span.
+
+        bs4 joins descendant strings with no separator, so the label reads
+        'TransactionStatus:' and stops matching its own name. Recognizing it
+        anyway routes this to a credit rather than merely refusing it.
+        """
+        html = (
+            "<html><body><table><tr><td>"
+            '<div style="color:#777777;">Transaction Amount:</div>'
+            '<div style="color:#333333;">INR 7310</div>'
+            '<div style="color:#777777;">Merchant Name:</div>'
+            '<div style="color:#333333;">SAMPLEMART ONLINE</div>'
+            '<div style="color:#777777;">Transaction <span>Status:</span></div>'
+            '<div style="color:#333333;">REVERSED</div>'
+            "</td></tr></table></body></html>"
+        )
+        result = parse_email("axis", html)
+        assert result.transaction is not None
+        assert result.email_type == "axis_cc_reversal"
+        assert result.transaction.direction == "credit"
+
+    def test_unstyled_status_label_fails_closed(self):
+        """Load-bearing: the status label carries no recognizable style, so the
+        label walk cannot see it at all.
+
+        The card text still says 'Transaction Status', and presence is probed
+        independently of the walk, so this refuses instead of reading the
+        walk's silence as absence and booking a debit.
+        """
+        html = (
+            "<html><body><table><tr><td>"
+            '<div style="color:#777777;">Transaction Amount:</div>'
+            '<div style="color:#333333;">INR 7310</div>'
+            '<div style="color:#777777;">Merchant Name:</div>'
+            '<div style="color:#333333;">SAMPLEMART ONLINE</div>'
+            "<div>Transaction Status:</div>"
+            '<div style="color:#333333;">REVERSED</div>'
+            "</td></tr></table></body></html>"
+        )
+        with pytest.raises(ParseError):
+            parse_email("axis", html)
+
+    def test_prose_mentioning_the_label_does_not_refuse_a_spend(self):
+        """Load-bearing: presence is an exact-label test, not a text search.
+
+        A sentence mentioning the label sits right beside the real fields, so
+        no boundary between card and prose separates them. Only equality does:
+        this text is never exactly 'Transaction Status'. A substring search
+        would refuse a legitimate spend here, trading the sign error for a
+        loss error — real transactions spooled — and both are severe.
+        """
+        html = (
+            "<html><body><table><tr><td>"
+            '<div style="color:#777777;">Transaction Amount:</div>'
+            '<div style="color:#333333;">INR 7310</div>'
+            '<div style="color:#777777;">Merchant Name:</div>'
+            '<div style="color:#333333;">SAMPLEMART ONLINE</div>'
+            '<div style="color:#777777;">Axis Bank Credit Card No.</div>'
+            '<div style="color:#333333;">XX4023</div>'
+            '<div style="color:#777777;">Available Limit*:</div>'
+            '<div style="color:#333333;">INR 240100</div>'
+            "<div>To check Transaction Status for any payment, visit the app.</div>"
+            "</td></tr></table></body></html>"
+        )
+        result = parse_email("axis", html)
+        assert result.transaction is not None
+        assert result.email_type == "axis_cc_debit_alert"
+        assert result.transaction.direction == "debit"
+
+    def test_unstyled_status_row_beside_a_nested_card_is_not_a_debit(self):
+        """Load-bearing: the readable fields sit in an inner wrapper while an
+        unstyled status row sits outside it, in the same card.
+
+        Any boundary inferred from where the recognized labels live excludes
+        this status row, and the exclusion reads as absence — a debit on a
+        reversal. Presence is decided per-node instead, so no boundary has to
+        be guessed correctly for the reversal to be noticed.
+        """
+        html = (
+            "<html><body><table><tr><td>"
+            '<div class="inner">'
+            '<div style="color:#777777;">Transaction Amount:</div>'
+            '<div style="color:#333333;">INR 7310</div>'
+            '<div style="color:#777777;">Merchant Name:</div>'
+            '<div style="color:#333333;">SAMPLEMART ONLINE</div>'
+            "</div>"
+            "<div>Transaction Status:</div><div>REVERSED</div>"
+            "</td></tr></table></body></html>"
+        )
+        with pytest.raises(ParseError):
+            parse_email("axis", html)
+
+    def test_unreadable_status_never_becomes_a_debit(self):
+        """The refusal must hold at the parser that hardcodes the sign, not
+        only via registry ordering."""
+        html = (
+            "<html><body><table><tr><td>"
+            '<div style="color:#777777;">Transaction Amount:</div>'
+            '<div style="color:#333333;">INR 7310</div>'
+            '<div style="color:#777777;">Transaction Status:</div>'
+            "</td></tr></table></body></html>"
+        )
+        with pytest.raises(ParseError):
+            AxisCcDebitAlertParser().parse(html)
+
+
+class TestAxisCcSpendAndReversal:
+    """Spend and reversal share one HTML layout and differ only in
+    'Transaction Status', so the sign must key on that field."""
+
+    def test_a_status_sharing_its_node_with_its_value_is_still_seen(self):
+        """A status a reader can see is a status, however the markup breaks.
+
+        The label and its value may arrive in one node rather than two. That
+        is the same field on the page, so it may not be read as the field's
+        absence -- absence is what marks a spend, and this body says REVERSED
+        in plain sight. It refuses instead: the value cannot be read from a
+        node the label already occupies, and a refusal is visible where a
+        debit would be silent.
+        """
+        html = _axis_cc_card_html(
+            [
+                ("Transaction Amount:", "INR 58210"),
+                ("Merchant Name:", "SAMPLEMART ONLINE"),
+                ("Axis Bank Credit Card No.", "XX4023"),
+                ("Date &amp; Time:", "12-02-26, 18:22:10 IST"),
+            ]
+        ).replace(
+            "</td></tr></table></body></html>",
+            '<div style="font-size:12px;color:#777777;">Transaction Status: REVERSED</div>'
+            "</td></tr></table></body></html>",
+        )
+        with pytest.raises(ParseError):
+            parse_email("axis", html)
+
+    def test_a_status_whose_value_is_nested_in_its_label_is_still_seen(self):
+        """The value nested inside the label node, rather than beside it."""
+        html = _axis_cc_card_html(
+            [
+                ("Transaction Amount:", "INR 58210"),
+                ("Merchant Name:", "SAMPLEMART ONLINE"),
+                ("Axis Bank Credit Card No.", "XX4023"),
+                ("Date &amp; Time:", "12-02-26, 18:22:10 IST"),
+            ]
+        ).replace(
+            "</td></tr></table></body></html>",
+            '<div style="font-size:12px;color:#777777;">Transaction Status: '
+            '<span style="font-size:14px;color:#333333;">REVERSED</span></div>'
+            "</td></tr></table></body></html>",
+        )
+        with pytest.raises(ParseError):
+            parse_email("axis", html)
+
+    def test_a_blank_status_is_not_a_missing_one(self):
+        """A layout carrying the status field, but blank, is not a spend.
+
+        Only a body with no status field at all is a spend. A blank value means
+        the field is there and says nothing, which is unread rather than absent
+        — and guessing "spend" from it books a debit, so a blank status on a
+        reversal would land with its sign inverted and nothing to show for it.
+        """
+        with pytest.raises(ParseError):
+            parse_email("axis", AXIS_CC_BLANK_STATUS_HTML)
+
+    def test_parses_spend_as_debit(self):
+        result = parse_email("axis", AXIS_CC_SPEND_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "axis_cc_debit_alert"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("58210")
+        assert result.transaction.counterparty == "SAMPLEMART ONLINE"
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("240100")
+
+    def test_parses_reversal_as_credit(self):
+        result = parse_email("axis", AXIS_CC_REVERSAL_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "axis_cc_reversal"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("58210")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.counterparty == "SAMPLEMART ONLINE"
+        assert result.transaction.card_mask == "XX4023"
+        assert result.transaction.channel == "card"
+        # Two-digit year in the reversal's Date & Time must still resolve.
+        assert result.transaction.transaction_date == date(2026, 2, 12)
+        assert result.transaction.transaction_time == time(18, 22, 10)
+        # No Available Limit is sent on a reversal.
+        assert result.transaction.balance is None
+
+    def test_spend_and_reversal_net_to_zero(self):
+        """The regression this guards: a charge and its reversal were both
+        recorded as debits, doubling the amount instead of cancelling."""
+        spend = parse_email("axis", AXIS_CC_SPEND_HTML)
+        reversal = parse_email("axis", AXIS_CC_REVERSAL_HTML)
+        assert spend.transaction is not None
+        assert reversal.transaction is not None
+
+        def signed(txn):
+            return -txn.amount.amount if txn.direction == "debit" else txn.amount.amount
+
+        assert signed(spend.transaction) + signed(reversal.transaction) == Decimal("0")
+
+    def test_debit_parser_refuses_reversal_directly(self):
+        """The debit parser hardcodes a sign, so it must reject a reversal on
+        its own rather than relying on registry ordering to shield it."""
+        parser = AxisCcDebitAlertParser()
+        with pytest.raises(ParseError):
+            parser.parse(AXIS_CC_REVERSAL_HTML)
+
+    def test_debit_parser_refuses_unknown_status(self):
+        """An unrecognized status has no established sign; failing loudly is
+        preferable to silently booking it as a spend."""
+        html = _axis_cc_card_html(
+            [
+                ("Transaction Amount:", "INR 1200"),
+                ("Merchant Name:", "SAMPLEMART ONLINE"),
+                ("Axis Bank Credit Card No.", "XX4023"),
+                ("Transaction Status:", "SOME UNSEEN STATUS"),
+            ]
+        )
+        parser = AxisCcDebitAlertParser()
+        with pytest.raises(ParseError):
+            parser.parse(html)
+
+    def test_unknown_status_does_not_fall_through_to_debit(self):
+        html = _axis_cc_card_html(
+            [
+                ("Transaction Amount:", "INR 1200"),
+                ("Merchant Name:", "SAMPLEMART ONLINE"),
+                ("Axis Bank Credit Card No.", "XX4023"),
+                ("Transaction Status:", "SOME UNSEEN STATUS"),
+            ]
+        )
+        with pytest.raises(ParseError):
+            parse_email("axis", html)
+
+    def test_reversal_parser_refuses_spend(self):
+        parser = AxisCcReversalParser()
+        with pytest.raises(ParseError):
+            parser.parse(AXIS_CC_SPEND_HTML)
+
+    def test_reversal_status_match_is_case_insensitive(self):
+        html = _axis_cc_card_html(
+            [
+                ("Transaction Amount:", "INR 990"),
+                ("Merchant Name:", "SAMPLEMART ONLINE"),
+                ("Axis Bank Credit Card No.", "XX4023"),
+                ("Transaction Status:", "Reversed"),
+            ]
+        )
+        result = parse_email("axis", html)
+        assert result.transaction is not None
+        assert result.email_type == "axis_cc_reversal"
+        assert result.transaction.direction == "credit"
 
 
 class TestAxisNeftStub:
