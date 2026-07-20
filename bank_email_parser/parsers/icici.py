@@ -7,6 +7,7 @@ Supported email types:
 - icici_bank_transfer_alert: Bank account IMPS/NEFT/RTGS transfer (debit)
 - icici_net_banking_alert: Net banking payment (debit)
 - icici_cc_reversal: Credit card merchant reversal/refund (credit back to card)
+- icici_cc_usage_control_notice: Non-ledger card usage-settings confirmation
 """
 
 import re
@@ -364,6 +365,24 @@ class IciciCcReversalParser(BaseEmailParser):
         )
 
 
+class IciciCcUsageControlNoticeParser(BaseEmailParser):
+    """ICICI card usage-control confirmation with no ledger transaction."""
+
+    bank = "icici"
+    email_type = "icici_cc_usage_control_notice"
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+        normalized = text.lower()
+        if not (
+            "we have applied the usage settings on your icici bank credit card"
+            in normalized
+            and "manage credit card usage" in normalized
+        ):
+            raise ParseError("Not an ICICI CC usage-control notice.")
+        return ParsedEmail(email_type=self.email_type, bank=self.bank)
+
+
 class IciciStatementEmailParser(BaseEmailParser):
     """ICICI account statement email — extracts password hint."""
 
@@ -395,6 +414,7 @@ _PARSERS = (
     IciciBankTransferAlertParser(),
     IciciNetBankingAlertParser(),
     IciciCcReversalParser(),
+    IciciCcUsageControlNoticeParser(),
     IciciStatementEmailParser(),
 )
 
