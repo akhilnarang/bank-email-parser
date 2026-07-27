@@ -9,6 +9,7 @@ Supported email types:
 - hdfc_imps_alert: IMPS transfer alert
 - hdfc_account_transfer_debit_alert: Savings-to-PPF/SSY transfer debit
 - hdfc_account_credit_alert: Savings-account inbound NEFT credit
+- hdfc_account_neft_debit_alert: Savings-account outward NEFT debit
 """
 
 import re
@@ -529,6 +530,62 @@ class HdfcAccountCreditAlertParser(BaseEmailParser):
         )
 
 
+class HdfcAccountNeftDebitParser(BaseEmailParser):
+    """HDFC savings account NEFT debit alert.
+
+    This parser reads: 'Rs. 1234.56 has been deducted from your HDFC Bank
+    account ending in XX0000 for a transfer to payee Sample Payee via NEFT
+    using HDFC Bank Online Banking.'
+
+    NEFT moves money from the savings account to an external payee. Thus
+    ``direction`` is ``debit`` and ``channel`` is ``neft``. The source
+    account gives ``account_mask``. The payee gives ``counterparty``.
+
+    The email has no reference number, no balance, and no date or time.
+    These fields stay empty.
+    """
+
+    bank = "hdfc"
+    email_type = "hdfc_account_neft_debit_alert"
+
+    # This pattern needs the words "to payee <name> via NEFT". Thus it does
+    # not take the PPF/SSY transfer alert or the UPI alert. Those alerts use
+    # "transferred ... to your PPF/Sukanya" and "to VPA".
+    _pattern = re.compile(
+        r"Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"has\s+been\s+deducted\s+from\s+your\s+HDFC\s+Bank\s+account\s+"
+        r"ending\s+in\s+(?P<account>\w+)\s+"
+        r"for\s+a\s+transfer\s+to\s+payee\s+(?P<counterparty>.+?)\s+"
+        # Use the full phrase at the end and not only "via NEFT". The name of
+        # a payee can contain those two words. The capture would then stop too
+        # soon and give an incomplete name.
+        r"via\s+NEFT\s+using\s+HDFC\s+Bank\s+Online\s+Banking",
+        re.DOTALL,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse HDFC account NEFT debit alert.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                counterparty=_clean_counterparty(match.group("counterparty")),
+                account_mask=match.group("account"),
+                channel="neft",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class HdfcStatementEmailParser(BaseEmailParser):
     """HDFC account statement email."""
 
@@ -560,6 +617,7 @@ _PARSERS = (
     HdfcImpsAlertParser(),
     HdfcAccountTransferDebitParser(),
     HdfcAccountCreditAlertParser(),
+    HdfcAccountNeftDebitParser(),
     HdfcStatementEmailParser(),
 )
 

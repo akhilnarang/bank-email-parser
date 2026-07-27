@@ -1531,6 +1531,86 @@ class TestHdfcAccountCreditAlertParser:
         assert result.transaction.balance.amount == Decimal("200.00")
 
 
+class TestHdfcAccountNeftDebitParser:
+    """HDFC savings account NEFT debit email.
+
+    "Rs. X has been deducted from your HDFC Bank account ending in XX0000
+    for a transfer to payee <name> via NEFT using HDFC Bank Online
+    Banking". The payee gives the counterparty. The email has no reference
+    number, no balance, and no date.
+    """
+
+    SAMPLE_HTML = """
+    <html><body>
+    HDFC BANK Dear Customer,
+    Thank you for banking with HDFC Bank.
+    Rs. 12345.67 has been deducted from your HDFC Bank account ending in
+    XX0000 for a transfer to payee Sample Payee via NEFT using HDFC Bank
+    Online Banking.
+    Not you? Call 00000000000
+    Warm Regards, HDFC Bank
+    </body></html>
+    """
+
+    def test_parses_neft_debit(self):
+        result = parse_email("hdfc", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_account_neft_debit_alert"
+        assert result.bank == "hdfc"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("12345.67")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.account_mask == "XX0000"
+        assert result.transaction.counterparty == "Sample Payee"
+        assert result.transaction.channel == "neft"
+
+    def test_no_reference_balance_or_date(self):
+        result = parse_email("hdfc", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.reference_number is None
+        assert result.transaction.balance is None
+        assert result.transaction.transaction_date is None
+        assert result.transaction.transaction_time is None
+
+    def test_does_not_shadow_ppf_transfer_debit(self):
+        result = parse_email("hdfc", TestHdfcAccountTransferDebitParser.SAMPLE_HTML)
+        assert result.email_type == "hdfc_account_transfer_debit_alert"
+
+    def test_does_not_shadow_upi_debit(self):
+        html = """
+        <html><body>
+        Rs.5000.00 has been debited from account 1234 to VPA merchant@upi
+        Sample Merchant on 15-01-26. Your UPI transaction reference number
+        is 123456789012.
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.email_type == "hdfc_upi_alert"
+
+    def test_payee_containing_the_delimiter_is_not_truncated(self):
+        html = """
+        <html><body>
+        HDFC BANK Dear Customer,
+        Rs. 12345.67 has been deducted from your HDFC Bank account ending in
+        XX0000 for a transfer to payee ACME via NEFT SERVICES via NEFT using
+        HDFC Bank Online Banking.
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.transaction.counterparty == "ACME via NEFT SERVICES"
+
+    def test_truncated_body_raises(self):
+        html = """
+        <html><body>
+        HDFC BANK Dear Customer,
+        Rs. 12345.67 has been deducted from your HDFC Bank account ending in
+        </body></html>
+        """
+        with pytest.raises(ParseError):
+            parse_email("hdfc", html)
+
+
 class TestHdfcCardDebitAlertParser:
     """HDFC credit/debit card transaction alerts.
 
