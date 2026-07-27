@@ -186,3 +186,90 @@ def test_parse_with_parsers_reuses_prepared_html_across_fallbacks(monkeypatch) -
 
     assert result.email_type == "second"
     assert calls == 1
+
+
+def test_a_parser_declares_the_default_time_source() -> None:
+    """A parser that says nothing declares that the body states the time."""
+
+    class _QuietParser(BaseEmailParser):
+        bank = "samplebank"
+        email_type = "samplebank_debit_alert"
+
+        def parse(self, html: str) -> ParsedEmail:
+            return ParsedEmail(
+                email_type=self.email_type,
+                bank=self.bank,
+                transaction=TransactionAlert(
+                    direction="debit", amount=Money(amount=Decimal("1.00"))
+                ),
+            )
+
+    assert _QuietParser.event_time_source == "body"
+    result = parse_with_parsers("samplebank", "<p>x</p>", (_QuietParser(),))
+    assert result.event_time_source == "body"
+
+
+def test_the_dispatcher_copies_the_time_source_to_the_result() -> None:
+    """The caller receives a model and not the class. Thus the dispatcher must
+    copy the declaration to each result."""
+
+    class _ArrivalParser(BaseEmailParser):
+        bank = "samplebank"
+        email_type = "samplebank_transfer_debit_alert"
+        event_time_source = "message_arrival"
+
+        def parse(self, html: str) -> ParsedEmail:
+            return ParsedEmail(
+                email_type=self.email_type,
+                bank=self.bank,
+                transaction=TransactionAlert(
+                    direction="debit", amount=Money(amount=Decimal("1.00"))
+                ),
+            )
+
+    result = parse_with_parsers("samplebank", "<p>x</p>", (_ArrivalParser(),))
+    assert result.event_time_source == "message_arrival"
+
+
+def test_a_parser_cannot_declare_an_unknown_time_source() -> None:
+    """The base class checks the value when you define the class. A wrong
+    value thus fails at import and not at run time."""
+    import pytest
+
+    with pytest.raises(TypeError, match="event_time_source"):
+
+        class _BadParser(BaseEmailParser):
+            bank = "samplebank"
+            email_type = "samplebank_typo_alert"
+            event_time_source = "arrival"
+
+            def parse(self, html: str) -> ParsedEmail:  # pragma: no cover
+                raise NotImplementedError
+
+
+def test_the_hdfc_neft_debit_parser_declares_message_arrival() -> None:
+    """This email has no time in the body, and HDFC sends it at the moment of
+    the transaction. The consumer needs this fact to supply the time."""
+    from bank_email_parser.parsers.hdfc import HdfcAccountNeftDebitParser
+
+    assert HdfcAccountNeftDebitParser.event_time_source == "message_arrival"
+
+
+def test_a_subclass_cannot_escape_the_time_source_check() -> None:
+    """A subclass can inherit bank and email_type and declare only
+    event_time_source. The base class must still check that value. If it does
+    not, a wrong value reaches the consumer, which reads it as "body" and
+    gives the row the wide window."""
+    import pytest
+
+    class _Parent(BaseEmailParser):
+        bank = "samplebank"
+        email_type = "samplebank_parent_alert"
+
+        def parse(self, html: str) -> ParsedEmail:  # pragma: no cover
+            raise NotImplementedError
+
+    with pytest.raises(TypeError, match="event_time_source"):
+
+        class _Child(_Parent):
+            event_time_source = "arrival"

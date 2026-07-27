@@ -543,10 +543,16 @@ class HdfcAccountNeftDebitParser(BaseEmailParser):
 
     The email has no reference number, no balance, and no date or time.
     These fields stay empty.
+
+    HDFC sends this email at the moment of the transaction. In 59 real
+    pairs, the email and the SMS arrive -5 to +14 seconds apart. Thus
+    ``event_time_source`` is ``message_arrival``, and the consumer can use
+    the time of arrival in place of the time of the event.
     """
 
     bank = "hdfc"
     email_type = "hdfc_account_neft_debit_alert"
+    event_time_source = "message_arrival"
 
     # This pattern needs the words "to payee <name> via NEFT". Thus it does
     # not take the PPF/SSY transfer alert or the UPI alert. Those alerts use

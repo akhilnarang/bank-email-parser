@@ -5,7 +5,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from bs4 import BeautifulSoup
 
@@ -28,16 +28,32 @@ _thread_local = threading.local()
 
 
 class BaseEmailParser(ABC):
+    """The base class for one email shape from one bank.
+
+    A subclass must define ``bank`` and ``email_type``. It can also define
+    ``event_time_source``. ``__init_subclass__`` checks all three values when
+    you define the class, so a wrong value stops the import.
+
+    Set ``event_time_source`` to ``message_arrival`` only when both of these
+    are true: the body has no time, and the bank sends the message at the
+    moment of the transaction. Examine real messages before you change it.
+    See ``ParsedEmail`` for what the consumer does with the value.
+    """
+
     bank: str
     email_type: str
+    event_time_source: Literal["body", "message_arrival"] = "body"
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
-        # Skip classes that don't define either attribute — abstract intermediates
-        if "bank" not in cls.__dict__ and "email_type" not in cls.__dict__:
+        # Skip a class that defines none of these. Such a class is an
+        # abstract intermediate. A class that defines only event_time_source
+        # must still get a check. Without it, a wrong value goes to the
+        # consumer, and the consumer reads that value as "body".
+        if not (cls.__dict__.keys() & {"bank", "email_type", "event_time_source"}):
             return
-        # If either attribute is defined locally, both must be resolvable
-        # (possibly inherited from a parent class)
+        # A class can inherit bank or email_type from a parent. Both values
+        # must still resolve to a string.
         bank = getattr(cls, "bank", None)
         email_type = getattr(cls, "email_type", None)
         if not isinstance(bank, str):
@@ -45,6 +61,11 @@ class BaseEmailParser(ABC):
         if not isinstance(email_type, str):
             raise TypeError(
                 f"{cls.__name__} must define an 'email_type: str' class attribute"
+            )
+        if getattr(cls, "event_time_source", None) not in ("body", "message_arrival"):
+            raise TypeError(
+                f"{cls.__name__} must define 'event_time_source' as "
+                "'body' or 'message_arrival'"
             )
 
     @staticmethod
@@ -123,6 +144,10 @@ def parse_with_parsers(
         for parser in parsers:
             try:
                 result = parser.parse(html)
+                # The class states this fact, but the caller receives only the
+                # model. Copy it across so the caller does not need to know
+                # which class matched.
+                result.event_time_source = parser.event_time_source
                 # Success — but warn about any unexpected errors from earlier parsers
                 if unexpected_errors:
                     warning = (
