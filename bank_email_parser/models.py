@@ -65,6 +65,23 @@ class ParsedEmail(BaseModel):
     the time from the time of arrival. It must also trust that time less than
     a time that the bank writes. Set this value on the parser class. The
     dispatcher copies the value to each result.
+
+    ``identifies_by`` tells the consumer which field shows which event this
+    message reports, when the counterparty cannot show it.
+
+    ``counterparty``
+        The message names a merchant or a payer. That name shows the event.
+        This is the default.
+
+    ``card_mask``
+        The message reports a payment of your own card bill. The payer is
+        you, so there is no merchant to name. The card mask shows which
+        event this is.
+
+    ``none``
+        The bank sends no field that shows the event. Two payments of the
+        same amount on the same day are thus alike in every field. The
+        consumer must ask a person, or keep both rows.
     """
 
     email_type: str
@@ -74,3 +91,4 @@ class ParsedEmail(BaseModel):
     password_hint: str | None = None
 
     event_time_source: Literal["body", "message_arrival"] = "body"
+    identifies_by: Literal["counterparty", "card_mask", "none"] = "counterparty"

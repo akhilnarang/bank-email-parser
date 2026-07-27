@@ -144,6 +144,9 @@ class IdfcCcCreditAlertParser(BaseEmailParser):
 
     bank = "idfc"
     email_type = "idfc_cc_credit_alert"
+    # You pay your own card bill, so this alert names no merchant. The
+    # card mask shows which payment it reports.
+    identifies_by = "card_mask"
 
     _pattern = re.compile(
         r"Payment\s+of\s+(?:Rs\.?|INR|₹)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"

@@ -38,6 +38,9 @@ class IndusindCcPaymentAlertParser(BaseEmailParser):
 
     bank = "indusind"
     email_type = "indusind_cc_payment_alert"
+    # This alert names no merchant and gives no card mask. Thus no field
+    # shows which card the payment belongs to.
+    identifies_by = "none"
 
     _pattern = re.compile(
         r"Payment\s+of\s+(?:INR|Rs\.?|₹)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
