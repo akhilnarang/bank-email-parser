@@ -201,6 +201,10 @@ class SliceCcPaymentAlertParser(BaseEmailParser):
 
     bank = "slice"
     email_type = "slice_cc_payment_alert"
+    # The counterparty is the fixed label "Payment received". It does not
+    # name a merchant. The body has no card mask. No field shows which
+    # card the payment belongs to. ``identifies_by`` is ``none``.
+    identifies_by = "none"
 
     _pattern = re.compile(
         r"received\s+your\s+repayment\s+of\s+"

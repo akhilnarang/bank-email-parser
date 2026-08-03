@@ -140,6 +140,29 @@ def test_indusind_cc_payment_parser_still_sets_transaction_date() -> None:
     assert result.transaction.transaction_date == date(2026, 1, 15)
 
 
+def test_slice_cc_payment_alert_declares_identifies_by_none() -> None:
+    # The body has no merchant and no card mask. The counterparty is
+    # the fixed label "Payment received". No field shows which card
+    # the payment belongs to. The parser must declare
+    # ``identifies_by == "none"``. If it does not, the consumer treats
+    # the fixed label as a discriminating counterparty. The pair with
+    # the slice repayment SMS then leaks through as a cross-channel
+    # duplicate.
+    html = """
+    <html><body>
+      <p>We&rsquo;ve received your repayment of &#8377; 1,234.56 for the slice credit card.</p>
+    </body></html>
+    """
+
+    result = parse_email("slice", html)
+
+    assert result.email_type == "slice_cc_payment_alert"
+    assert result.identifies_by == "none"
+    assert result.transaction is not None
+    assert result.transaction.counterparty == "Payment received"
+    assert result.transaction.card_mask is None
+
+
 def test_parse_with_parsers_reuses_prepared_html_across_fallbacks(monkeypatch) -> None:
     calls = 0
     original = BaseEmailParser._build_prepared_email
