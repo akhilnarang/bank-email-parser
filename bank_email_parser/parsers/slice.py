@@ -3,6 +3,7 @@
 Supported email types:
 - slice_transaction_alert: UPI/IMPS/NEFT credit or debit alert ('received/sent via' pattern)
 - slice_transfer_alert: IMPS/RTGS/NEFT debit alert ('transaction of ₹X from' pattern); skips 'initiated' emails
+- slice_cc_transaction_alert: Slice credit card purchase alert, incl. international (forex) spends
 - slice_cc_payment_alert: Slice credit card bill repayment received
 - slice_cc_statement: Slice credit card monthly statement announcement
 - slice_account_statement: Slice savings account statement (password-protected PDF)
@@ -193,6 +194,57 @@ class SliceTransferAlertParser(BaseEmailParser):
         )
 
 
+class SliceCcTransactionAlertParser(BaseEmailParser):
+    """Slice credit card purchase alerts, including international (forex) spends.
+
+    Matches:
+      'Transaction of ₹X at MERCHANT from your slice credit card xxNNNN was successful.'
+      'Transaction of USD Y | ₹X at MERCHANT from your slice credit card xxNNNN was successful.'
+
+    The settled ₹ figure is the transaction amount. On a foreign-currency
+    spend the original currency has no model field, so it is preserved only in
+    ``raw_description``.
+    """
+
+    bank = "slice"
+    email_type = "slice_cc_transaction_alert"
+
+    _body_pattern = re.compile(
+        r"Transaction\s+of\s+"
+        # Optional foreign-currency original, e.g. "USD 42.50 | " on an
+        # international spend. The settled INR figure below is the amount.
+        r"(?:[A-Za-z]{3}\s+[\d,]+(?:\.\d+)?\s*\|\s*)?"
+        rf"₹\s*(?P<amount>{_AMT})\s+"
+        # Bound the merchant length. An unbounded lazy capture backtracks
+        # quadratically when the trailing 'from your slice credit card' marker
+        # never appears; a crafted body could then pin a worker. Real merchant
+        # descriptors are short, so 200 characters is ample.
+        r"at\s+(?P<merchant>.{1,200}?)\s+"
+        r"from\s+your\s+slice\s+credit\s+card\s+(?P<card>[\w\-*]+)\s+"
+        r"was\s+successful",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._body_pattern.search(text)):
+            raise ParseError("Could not parse slice credit card transaction alert.")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=_clean_amount(match.group("amount"))),
+                counterparty=match.group("merchant").strip(),
+                card_mask=match.group("card"),
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class SliceCcPaymentAlertParser(BaseEmailParser):
     """Slice credit card bill payment received.
 
@@ -278,6 +330,7 @@ class SliceStatementEmailParser(BaseEmailParser):
 _PARSERS = (
     SliceTransactionAlertParser(),
     SliceTransferAlertParser(),
+    SliceCcTransactionAlertParser(),
     SliceCcPaymentAlertParser(),
     SliceCcStatementParser(),
     SliceStatementEmailParser(),

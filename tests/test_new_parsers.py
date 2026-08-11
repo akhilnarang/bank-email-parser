@@ -2489,3 +2489,66 @@ class TestKotakDigitalTransactionParser:
         ref = result.transaction.reference_number or ""
         assert "unable to view" not in ref.lower()
         assert "click here" not in ref.lower()
+
+
+class TestSliceCcTransactionAlertParser:
+    """Slice credit card purchase alerts, including international (forex) spends.
+
+    All values are fabricated. The real alert that motivated this parser is a
+    foreign-currency spend; it is not reproduced here because this repo is
+    public.
+    """
+
+    FOREX_HTML = """
+    <html><body>
+    <p>Hi SAMPLE,<br>
+    Transaction of USD 42.50 | ₹ 3,571.00 at EXAMPLE CLOUD INC SAN FRANCISCO US
+    from your slice credit card xx1234 was successful.</p>
+    </body></html>
+    """
+
+    def test_parses_forex_cc_spend(self):
+        result = parse_email("slice", self.FOREX_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "slice_cc_transaction_alert"
+        assert result.bank == "slice"
+        assert result.transaction.direction == "debit"
+        # The amount is the settled INR figure, not the USD original.
+        assert result.transaction.amount.amount == Decimal("3571.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.counterparty == "EXAMPLE CLOUD INC SAN FRANCISCO US"
+        assert result.transaction.card_mask == "xx1234"
+        assert result.transaction.channel == "card"
+
+    def test_parses_domestic_inr_spend(self):
+        """A same-shaped alert with no foreign-currency prefix parses too."""
+        html = """
+        <html><body>
+        <p>Transaction of ₹ 999.00 at SAMPLE STORE BENGALURU IN
+        from your slice credit card xx5678 was successful.</p>
+        </body></html>
+        """
+        result = parse_email("slice", html)
+        assert result.transaction is not None
+        assert result.email_type == "slice_cc_transaction_alert"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("999.00")
+        assert result.transaction.counterparty == "SAMPLE STORE BENGALURU IN"
+        assert result.transaction.card_mask == "xx5678"
+        assert result.transaction.channel == "card"
+
+    def test_rejects_pathologically_long_merchant(self):
+        """The merchant capture is length-bounded to keep rejection linear.
+
+        An unbounded lazy match backtracks quadratically: ``.search`` retries
+        at every repeated 'Transaction of ₹X at …' position, each scanning to
+        end of input for a delimiter that never appears. A merchant longer than
+        the bound does not parse, which also pins the bound against regression.
+        """
+        html = (
+            "<html><body><p>Transaction of ₹ 1.00 at "
+            + "X" * 300
+            + " from your slice credit card xx1234 was successful.</p></body></html>"
+        )
+        with pytest.raises(ParseError):
+            parse_email("slice", html)
