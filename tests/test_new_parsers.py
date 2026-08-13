@@ -2552,3 +2552,89 @@ class TestSliceCcTransactionAlertParser:
         )
         with pytest.raises(ParseError):
             parse_email("slice", html)
+
+
+class TestKotakUpiCreditParser:
+    """Kotak811 UPI incoming credit alert.
+
+    All values are fabricated; the real alert is a self-transfer whose sender
+    is the account holder, so it is not reproduced here (public repo).
+    """
+
+    SAMPLE_HTML = """
+    <html><body>
+    <p>Hi 811 Customer,<br>
+    You&rsquo;ve received a UPI Credit in your Kotak A/c (XX9999).<br>
+    Here's the summary of your transaction:<br>
+    Date: 15-Mar-26<br>
+    Amount: ₹2500.50<br>
+    Sender: SAMPLE PERSON NAME<br>
+    UPI Reference Number (RRN): 999888777666<br>
+    View balance: https://kotak811.com/mbapp/pay</p>
+    </body></html>
+    """
+
+    def test_parses_upi_credit(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "kotak_upi_credit"
+        assert result.bank == "kotak"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("2500.50")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.counterparty == "SAMPLE PERSON NAME"
+        assert result.transaction.reference_number == "999888777666"
+        assert result.transaction.account_mask == "XX9999"
+        assert result.transaction.channel == "upi"
+
+    def test_parses_date(self):
+        result = parse_email("kotak", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.transaction_date == date(2026, 3, 15)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            # No Sender row.
+            "received a UPI Credit in your Kotak A/c (XX1). Date: 15-Mar-26 "
+            "Amount: ₹1.00 UPI Reference Number (RRN): 111222333",
+            # Empty Sender: the following labels must not be read as the name.
+            "received a UPI Credit in your Kotak A/c (XX1). Date: 15-Mar-26 "
+            "Amount: ₹1.00 Sender: UPI Reference Number (RRN): 111222333",
+            # No RRN — the dedup key is required.
+            "received a UPI Credit in your Kotak A/c (XX1). Date: 15-Mar-26 "
+            "Amount: ₹1.00 Sender: SAMPLE NAME",
+            # No Date.
+            "received a UPI Credit in your Kotak A/c (XX1). Amount: ₹1.00 "
+            "Sender: SAMPLE NAME UPI Reference Number (RRN): 111222333",
+            # Present but impossible Date.
+            "received a UPI Credit in your Kotak A/c (XX1). Date: 31-Feb-26 "
+            "Amount: ₹1.00 Sender: SAMPLE NAME UPI Reference Number (RRN): 111222333",
+            # Sender is the last field before a long footer with no terminating
+            # label; the bounded capture must refuse, not bleed the footer into
+            # the counterparty (the downstream event identity).
+            "received a UPI Credit in your Kotak A/c (XX1). Date: 15-Mar-26 "
+            "Amount: ₹1.00 UPI Reference Number (RRN): 111222333 "
+            "Sender: SAMPLE NAME " + "footer " * 30,
+        ],
+        ids=["no-sender", "empty-sender", "no-rrn", "no-date", "bad-date", "footer-bleed"],
+    )
+    def test_rejects_incomplete_or_malformed_credit(self, body):
+        with pytest.raises(ParseError):
+            parse_email("kotak", f"<html><body><p>{body}</p></body></html>")
+
+    def test_prefers_summary_values_over_earlier_decoys(self):
+        """Amount/Date are read from the summary that follows the marker, not an
+        earlier promotional line, and 'Date:' does not match inside 'Update:'."""
+        html = (
+            "<html><body><p>"
+            "Update: 02-Feb-26 Promotional Amount: ₹9 "
+            "You&rsquo;ve received a UPI Credit in your Kotak A/c (XX9999). "
+            "Date: 01-Jan-26 Amount: ₹1.00 Sender: SAMPLE PERSON NAME "
+            "UPI Reference Number (RRN): 111222333"
+            "</p></body></html>"
+        )
+        result = parse_email("kotak", html)
+        assert result.transaction.amount.amount == Decimal("1.00")
+        assert result.transaction.transaction_date == date(2026, 1, 1)
+        assert result.transaction.counterparty == "SAMPLE PERSON NAME"
