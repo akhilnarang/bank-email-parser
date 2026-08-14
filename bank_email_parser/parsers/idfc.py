@@ -4,6 +4,8 @@ Supported email types:
 - idfc_account_alert: Savings account credit/debit alert (RTGS/NEFT/IMPS)
 - idfc_cc_debit_alert: Credit card spend alert
 - idfc_cc_credit_alert: Credit card payment received alert
+- idfc_account_neft_beneficiary_credit_alert: NEFT beneficiary-received
+  confirmation for an outward transfer
 """
 
 import re
@@ -11,7 +13,7 @@ import re
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BankParser, BaseEmailParser
-from bank_email_parser.utils import parse_amount, parse_datetime
+from bank_email_parser.utils import parse_amount, parse_date, parse_datetime
 
 
 class IdfcAccountAlertParser(BaseEmailParser):
@@ -182,6 +184,66 @@ class IdfcCcCreditAlertParser(BaseEmailParser):
         )
 
 
+class IdfcNeftBeneficiaryCreditParser(BaseEmailParser):
+    """IDFC FIRST Bank NEFT beneficiary-received confirmation.
+
+    Matches:
+      'Your beneficiary BENEFICIARY NAME has received ₹12,345.00 on
+       15-01-2026 transferred via NEFT UTR IDFB0000X0000000.'
+
+    The email counterpart of the bank's SMS confirmation that a NEFT the
+    user **initiated** reached the beneficiary — it is NOT a credit to the
+    user's own account. ``direction="debit"`` because the event describes
+    money leaving the user (the same outflow as the NEFT debit alert,
+    here confirmed from the beneficiary's side); modelling it as a credit
+    would falsely imply the user received funds. The body carries no
+    account mask or balance; the beneficiary name is the counterparty and
+    the UTR is the reference, so the consumer can dedupe against the
+    matching NEFT debit by UTR. The shared
+    ``idfc_account_neft_beneficiary_credit_alert`` email_type keeps the
+    SMS and email confirmations of the same transfer on one event name.
+    """
+
+    bank = "idfc"
+    email_type = "idfc_account_neft_beneficiary_credit_alert"
+
+    _pattern = re.compile(
+        r"Your\s+beneficiary\s+(?P<name>.+?)\s+has\s+received\s+"
+        r"(?:₹|Rs\.?\s*|INR\s+)(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"on\s+(?P<date>\d{2}-\d{2}-\d{4})\s+"
+        r"transferred\s+via\s+NEFT\s+UTR\s+(?P<ref>[A-Z0-9]+)",
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse IDFC NEFT beneficiary-received alert.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        # The date is a mandatory field of this shape; a value the regex
+        # accepted but the calendar rejects (e.g. 31-02) must fail loudly
+        # rather than silently drop a body-provided date.
+        if (txn_date := parse_date(match.group("date"))) is None:
+            raise ParseError(f"Could not parse date: {match.group('date')!r}")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                counterparty=match.group("name").strip(),
+                reference_number=match.group("ref"),
+                channel="neft",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class IdfcStatementEmailParser(BaseEmailParser):
     """IDFC account statement email."""
 
@@ -203,6 +265,10 @@ _PARSERS = (
     IdfcAccountAlertParser(),
     IdfcCcDebitAlertParser(),
     IdfcCcCreditAlertParser(),
+    # NEFT beneficiary-received confirmation: unique "Your beneficiary ...
+    # has received ... via NEFT UTR ..." anchor; cannot collide with the
+    # account or CC shapes.
+    IdfcNeftBeneficiaryCreditParser(),
     IdfcStatementEmailParser(),
 )
 

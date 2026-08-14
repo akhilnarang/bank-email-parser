@@ -1,10 +1,11 @@
-"""SBI Card (State Bank of India credit card) email parsers.
+"""SBI (State Bank of India) email parsers — credit card and debit card.
 
 Supported email types:
 - sbi_cc_transaction_alert: Credit card spend alert in INR
 - sbi_cc_fx_transaction_alert: Credit card spend alert in a foreign currency (USD, EUR, etc.)
 - sbi_cc_emandate_debit: Recurring e-mandate (Standing Instruction) debit success
 - sbi_cc_transaction_declined: Standing Instruction transaction declined (no funds moved)
+- sbi_dc_transaction_alert: Debit card POS/ECOM purchase alert
 - sbi_payment_ack: Credit card payment acknowledgment from BillDesk
 """
 
@@ -15,7 +16,13 @@ from bs4 import BeautifulSoup
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BankParser, BaseEmailParser
-from bank_email_parser.utils import normalize_whitespace, parse_amount, parse_date
+from bank_email_parser.utils import (
+    extract_table_pairs,
+    normalize_whitespace,
+    parse_amount,
+    parse_date,
+    parse_datetime,
+)
 
 # ISO 4217 currency codes that may appear in SBI CC foreign-currency alerts.
 # Extend this list as new currencies are encountered.
@@ -247,6 +254,85 @@ class SbiCcDeclinedParser(BaseEmailParser):
         )
 
 
+class SbiDcTransactionAlertParser(BaseEmailParser):
+    """SBI debit card POS/ECOM purchase alert.
+
+    A label/value table inside the bank's "Transaction Alert" shell:
+
+      Terminal Owner Name  SAMPLE MERCHANT
+      Terminal Id          ABC00000
+      Date & Time          Jan 15, 2026, 15:58
+      Transaction Number   000000000000
+      Amount (INR)         1234.00
+      Last 4 Digit of Card X0000
+      Transaction Type     PURCHASE
+      Channel              POS / ECOM
+      City                 Mumbai
+      Location             SAMPLE MERCHANT
+
+    Only ``PURCHASE`` rows are accepted (a debit from the linked savings
+    account); an unfamiliar Transaction Type raises ``ParseError`` so a
+    new shape surfaces as a failure instead of a silently mislabelled
+    debit. The terminal owner is the counterparty and the transaction
+    number is the reference.
+    """
+
+    bank = "sbi"
+    email_type = "sbi_dc_transaction_alert"
+
+    _ANCHOR = "using your sbi debit card"
+
+    _EXPECTED_KEYS = {
+        "terminal owner name",
+        "date time",
+        "transaction number",
+        "amount inr",
+        "last 4 digit of card",
+        "transaction type",
+    }
+
+    def parse(self, html: str) -> ParsedEmail:
+        soup, text = self.prepare_html(html)
+
+        if self._ANCHOR not in text.lower():
+            raise ParseError("Not an SBI debit card transaction alert.")
+
+        pairs = extract_table_pairs(soup)
+        if missing := self._EXPECTED_KEYS - pairs.keys():
+            raise ParseError(
+                f"SBI debit card alert is missing fields: {sorted(missing)}"
+            )
+
+        if pairs["transaction type"].strip().upper() != "PURCHASE":
+            raise ParseError(
+                f"Unhandled SBI debit card transaction type: "
+                f"{pairs['transaction type']!r}"
+            )
+
+        if (amount := parse_amount(pairs["amount inr"])) is None:
+            raise ParseError(f"Could not parse amount: {pairs['amount inr']!r}")
+
+        # "Date & Time" is a required table field; an unparseable value is a
+        # format change that must fail loudly, not a silently dateless debit.
+        if (txn_dt := parse_datetime(pairs["date time"])) is None:
+            raise ParseError(f"Could not parse date/time: {pairs['date time']!r}")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                transaction_date=txn_dt.date(),
+                transaction_time=txn_dt.time(),
+                counterparty=pairs["terminal owner name"].strip(),
+                card_mask=pairs["last 4 digit of card"].strip(),
+                reference_number=pairs["transaction number"].strip(),
+                channel="card",
+            ),
+        )
+
+
 class SbiPaymentAckParser(BaseEmailParser):
     """SBI Card payment acknowledgment from BillDesk.
 
@@ -323,6 +409,9 @@ _PARSERS = (
     SbiCcFxTransactionAlertParser(),
     SbiCcEMandateParser(),
     SbiCcDeclinedParser(),
+    # Debit card purchase: gated on the "using your SBI debit card" anchor
+    # plus the label/value table, so it cannot shadow the CC shapes.
+    SbiDcTransactionAlertParser(),
     SbiPaymentAckParser(),
 )
 

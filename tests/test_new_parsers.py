@@ -2638,3 +2638,147 @@ class TestKotakUpiCreditParser:
         assert result.transaction.amount.amount == Decimal("1.00")
         assert result.transaction.transaction_date == date(2026, 1, 1)
         assert result.transaction.counterparty == "SAMPLE PERSON NAME"
+
+
+class TestIdfcNeftBeneficiaryCreditParser:
+    """IDFC NEFT beneficiary-received confirmation (outward transfer)."""
+
+    SAMPLE_TEXT = (
+        "Dear Mr. CUSTOMER NAME,\n\n"
+        "Greetings from IDFC FIRST Bank.\n\n"
+        "Your beneficiary CUSTOMER NAME  has received ₹12,345.00 on "
+        "15-01-2026 transferred via NEFT UTR IDFB0000X0000000.\n\n"
+        "This is an auto generated e-mail. Please do not reply.\n"
+    )
+
+    def test_parses_beneficiary_received(self):
+        result = parse_email("idfc", self.SAMPLE_TEXT)
+        assert result.email_type == "idfc_account_neft_beneficiary_credit_alert"
+        assert result.bank == "idfc"
+        txn = result.transaction
+        assert txn is not None
+        # The event describes money leaving the user (an outward NEFT
+        # confirmed from the beneficiary's side), not an inbound credit.
+        assert txn.direction == "debit"
+        assert txn.amount.amount == Decimal("12345.00")
+        assert txn.amount.currency == "INR"
+        assert txn.transaction_date == date(2026, 1, 15)
+        assert txn.counterparty == "CUSTOMER NAME"
+        assert txn.reference_number == "IDFB0000X0000000"
+        assert txn.channel == "neft"
+        assert txn.account_mask is None
+
+    def test_parses_rs_prefix_variant(self):
+        body = self.SAMPLE_TEXT.replace("₹12,345.00", "Rs. 12,345.00")
+        result = parse_email("idfc", body)
+        assert result.transaction is not None
+        assert result.transaction.amount.amount == Decimal("12345.00")
+
+    def test_rejects_body_without_utr(self):
+        body = self.SAMPLE_TEXT.replace("transferred via NEFT UTR IDFB0000X0000000", "")
+        with pytest.raises(ParseError):
+            parse_email("idfc", body)
+
+    def test_rejects_impossible_date(self):
+        body = self.SAMPLE_TEXT.replace("15-01-2026", "31-02-2026")
+        with pytest.raises(ParseError):
+            parse_email("idfc", body)
+
+
+class TestHdfcRupayUpiDebitFraudCheckVariant:
+    """HDFC RuPay CC UPI debit — fraud-check template ("Paid to ... Date: ...")."""
+
+    SAMPLE_HTML = (
+        "<html><body>"
+        "<p>Dear Customer , Greetings from HDFC Bank! We're sharing this alert "
+        "to help you quickly check a recent UPI transaction made using your "
+        "RuPay Credit Card.</p>"
+        "<p>Transaction Details: Rs.123.00 has been debited from your RuPay "
+        "Credit Card (ending 0000) Paid to samplemerchant@upi Date: 15-01-26</p>"
+        "<p>UPI Transaction Reference Number: 000000000000</p>"
+        "<p>Important Note: If you made this transaction, no action is needed.</p>"
+        "</body></html>"
+    )
+
+    def test_parses_fraud_check_variant(self):
+        result = parse_email("hdfc", self.SAMPLE_HTML)
+        assert result.email_type == "hdfc_rupay_upi_debit"
+        txn = result.transaction
+        assert txn is not None
+        assert txn.direction == "debit"
+        assert txn.amount.amount == Decimal("123.00")
+        assert txn.transaction_date == date(2026, 1, 15)
+        assert txn.counterparty == "samplemerchant@upi"
+        assert txn.card_mask == "0000"
+        assert txn.reference_number == "000000000000"
+        assert txn.channel == "upi"
+
+    def test_rejects_truncated_date(self):
+        html = self.SAMPLE_HTML.replace("Date: 15-01-26", "Date: 15")
+        with pytest.raises(ParseError):
+            parse_email("hdfc", html)
+
+
+class TestSbiDcTransactionAlertParser:
+    """SBI debit card POS/ECOM purchase alert (label/value table)."""
+
+    @staticmethod
+    def _html(txn_type: str = "PURCHASE") -> str:
+        rows = [
+            ("Terminal Owner Name", "SAMPLE MERCHANT"),
+            ("Terminal Id", "ABC00000"),
+            ("Date &amp; Time", "Jan 15, 2026, 15:58"),
+            ("Transaction Number", "000000000000"),
+            ("Amount (INR)", "1234.00"),
+            ("Last 4 Digit of Card", "X0000"),
+            ("Transaction Type", txn_type),
+            ("Channel", "POS / ECOM"),
+            ("City", "Mumbai"),
+            ("Location", "SAMPLE MERCHANT"),
+        ]
+        table = "".join(
+            f"<tr><td>{label}</td><td>{value}</td></tr>" for label, value in rows
+        )
+        return (
+            "<html><body>"
+            "<p>Dear Valued SBI Debit Card Holder, The below transaction has "
+            "been done using your SBI debit card.</p>"
+            f"<table><tr><th>Description</th><th>Value</th></tr>{table}</table>"
+            "<p>If not done by you, forward this email from email id registered "
+            "with SBI to block your card.</p>"
+            "</body></html>"
+        )
+
+    def test_parses_purchase(self):
+        result = parse_email("sbi", self._html())
+        assert result.email_type == "sbi_dc_transaction_alert"
+        assert result.bank == "sbi"
+        txn = result.transaction
+        assert txn is not None
+        assert txn.direction == "debit"
+        assert txn.amount.amount == Decimal("1234.00")
+        assert txn.amount.currency == "INR"
+        assert txn.transaction_date == date(2026, 1, 15)
+        assert txn.transaction_time == time(15, 58)
+        assert txn.counterparty == "SAMPLE MERCHANT"
+        assert txn.card_mask == "X0000"
+        assert txn.reference_number == "000000000000"
+        assert txn.channel == "card"
+
+    def test_rejects_unknown_transaction_type(self):
+        with pytest.raises(ParseError):
+            parse_email("sbi", self._html(txn_type="REFUND"))
+
+    def test_rejects_unparseable_date_time(self):
+        html = self._html().replace("Jan 15, 2026, 15:58", "not a date")
+        with pytest.raises(ParseError):
+            parse_email("sbi", html)
+
+    def test_rejects_cc_spend_email(self):
+        """The debit-card parser must not shadow the CC spend shape."""
+        html = (
+            "<html><body><p>Rs.1,500.00 spent on your SBI Credit Card ending "
+            "1234 at SAMPLE MERCHANT on 15/01/26.</p></body></html>"
+        )
+        result = parse_email("sbi", html)
+        assert result.email_type == "sbi_cc_transaction_alert"

@@ -317,8 +317,8 @@ class HdfcRupayUpiDebitParser(BaseEmailParser):
     # Newer variant: "is debited" instead of "has been debited", an explicit
     # "and credited to VPA <vpa> (<Merchant>)" clause, and a spelled-out
     # "DD Mon, YYYY" date:
-    #   "Rs.9.00 is debited from your HDFC Bank RuPay Credit Card ending 5854
-    #    and credited to VPA uber1.rzp@hdfcbank (UBER INDIA SYSTEMS PRIVATE
+    #   "Rs.9.00 is debited from your HDFC Bank RuPay Credit Card ending 0000
+    #    and credited to VPA merchant.rzp@hdfcbank (SAMPLE MERCHANT PRIVATE
     #    LIMITED) on 19 May, 2026."
     _pattern_v2 = re.compile(
         r"Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
@@ -330,18 +330,35 @@ class HdfcRupayUpiDebitParser(BaseEmailParser):
         re.DOTALL,
     )
 
+    # Fraud-check variant: drops the "HDFC Bank" brand before "RuPay Credit
+    # Card", puts the card mask in parentheses, introduces the payee with
+    # "Paid to" and the date with a "Date:" label:
+    #   "Rs.123.00 has been debited from your RuPay Credit Card
+    #    (ending 0000) Paid to merchant@upi Date: 15-01-26"
+    _pattern_v3 = re.compile(
+        r"Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"has\s+been\s+debited\s+from\s+your\s+RuPay\s+Credit\s+Card\s+"
+        r"\(ending\s+(?P<card>\d{4})\)\s+"
+        r"Paid\s+to\s+(?P<vpa>\S+)\s+"
+        r"Date:\s*(?P<date>\d{1,2}-\d{1,2}-\d{2,4})",
+        re.DOTALL,
+    )
+
     # Reference label varies: "UPI transaction reference number is 123"
-    # (classic) and "UPI transaction reference no.: 123" (newer variant).
+    # (classic), "UPI transaction reference no.: 123" (v2), and
+    # "UPI Transaction Reference Number: 123" (fraud-check variant).
     # Anchored on the "UPI transaction reference" label so an unrelated
     # "reference no.:" elsewhere in the email is not captured.
     _ref_pattern = re.compile(
-        r"UPI\s+transaction\s+reference\s+(?:number\s+is|no\.?:?)\s+(?P<ref>\d+)",
+        r"UPI\s+transaction\s+reference\s+(?:number\s+is|number\s*:|no\.?:?)"
+        r"\s+(?P<ref>\d+)",
+        re.IGNORECASE,
     )
 
     def parse(self, html: str) -> ParsedEmail:
         _, text = self.prepare_html(html)
 
-        for pattern in (self._pattern, self._pattern_v2):
+        for pattern in (self._pattern, self._pattern_v2, self._pattern_v3):
             if match := pattern.search(text):
                 break
         else:
@@ -354,6 +371,10 @@ class HdfcRupayUpiDebitParser(BaseEmailParser):
         if ref_match := self._ref_pattern.search(text):
             reference_number = ref_match.group("ref")
 
+        # v3 carries no merchant name, only the VPA; groupdict() keeps the
+        # lookup safe for patterns without a counterparty group.
+        counterparty = match.groupdict().get("counterparty") or match.group("vpa")
+
         return ParsedEmail(
             email_type=self.email_type,
             bank=self.bank,
@@ -361,9 +382,7 @@ class HdfcRupayUpiDebitParser(BaseEmailParser):
                 direction="debit",
                 amount=Money(amount=amount),
                 transaction_date=parse_date(match.group("date")),
-                counterparty=(
-                    match.group("counterparty") or match.group("vpa")
-                ).strip(),
+                counterparty=counterparty.strip(),
                 card_mask=match.group("card"),
                 reference_number=reference_number,
                 channel="upi",
