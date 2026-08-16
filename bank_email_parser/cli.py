@@ -3,7 +3,6 @@
 import email
 from pathlib import Path
 
-import click
 import typer
 
 from bank_email_parser.api import SUPPORTED_BANKS, parse_email
@@ -56,8 +55,7 @@ def main(
     bank: str = typer.Option(
         ...,
         "--bank",
-        help="Bank identifier.",
-        click_type=click.Choice(SUPPORTED_BANKS),
+        help=f"Bank identifier. One of: {', '.join(SUPPORTED_BANKS)}.",
     ),
 ) -> None:
     """Parse an email body from a file or stdin.
