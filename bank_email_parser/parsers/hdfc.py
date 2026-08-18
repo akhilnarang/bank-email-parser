@@ -10,6 +10,7 @@ Supported email types:
 - hdfc_account_transfer_debit_alert: Savings-to-PPF/SSY transfer debit
 - hdfc_account_credit_alert: Savings-account inbound NEFT credit
 - hdfc_account_neft_debit_alert: Savings-account outward NEFT debit
+- hdfc_account_online_transfer_debit_alert: Savings-account net-banking payee transfer debit (no rail named)
 """
 
 import re
@@ -611,6 +612,64 @@ class HdfcAccountNeftDebitParser(BaseEmailParser):
         )
 
 
+class HdfcAccountOnlineTransferDebitParser(BaseEmailParser):
+    """HDFC savings account net-banking payee transfer debit alert.
+
+    This parser reads: 'Rs. 12345.67 has been deducted from your Account
+    No. ending in XX0000 for a Transfer to payee Sample Payee via HDFC Bank
+    Online Banking.'
+
+    The transfer moves money from the savings account to a payee over net
+    banking. The bank names no rail (NEFT, IMPS, or RTGS), so ``channel``
+    is ``online``. The source account gives ``account_mask``. The payee
+    gives ``counterparty``.
+
+    The email has no reference number, no balance, and no date or time.
+    These fields stay empty.
+
+    HDFC sends this email at the moment of the transaction. Thus
+    ``event_time_source`` is ``message_arrival``, and the consumer must
+    trust the time less than a time that the bank writes.
+    """
+
+    bank = "hdfc"
+    email_type = "hdfc_account_online_transfer_debit_alert"
+    event_time_source = "message_arrival"
+
+    _pattern = re.compile(
+        r"Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"has\s+been\s+deducted\s+from\s+your\s+Account\s+No\.\s+"
+        r"ending\s+in\s+(?P<account>\w+)\s+"
+        r"for\s+a\s+Transfer\s+to\s+payee\s+(?P<counterparty>.+?)\s+"
+        r"via\s+HDFC\s+Bank\s+Online\s+Banking",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError(
+                "Could not parse HDFC account online transfer debit alert."
+            )
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                counterparty=_clean_counterparty(match.group("counterparty")),
+                account_mask=match.group("account"),
+                channel="online",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class HdfcStatementEmailParser(BaseEmailParser):
     """HDFC account statement email."""
 
@@ -643,6 +702,7 @@ _PARSERS = (
     HdfcAccountTransferDebitParser(),
     HdfcAccountCreditAlertParser(),
     HdfcAccountNeftDebitParser(),
+    HdfcAccountOnlineTransferDebitParser(),
     HdfcStatementEmailParser(),
 )
 

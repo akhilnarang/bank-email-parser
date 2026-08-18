@@ -1611,6 +1611,66 @@ class TestHdfcAccountNeftDebitParser:
             parse_email("hdfc", html)
 
 
+class TestHdfcAccountOnlineTransferDebitParser:
+    """HDFC savings account net-banking payee transfer debit email.
+
+    "Rs. X has been deducted from your Account No. ending in XX0000 for a
+    Transfer to payee <name> via HDFC Bank Online Banking". The bank names
+    no rail, so the channel is "online". The payee gives the counterparty.
+    The email has no reference number, no balance, and no date.
+    """
+
+    SAMPLE_HTML = """
+    <html><body>
+    HDFC BANK Dear Customer,
+    Thank you for banking with HDFC Bank.
+    Rs. 12345.67 has been deducted from your Account No. ending in XX0000
+    for a Transfer to payee Sample Payee via HDFC Bank Online Banking.
+    Not you? Call 00000000000
+    Warm Regards, HDFC Bank
+    </body></html>
+    """
+
+    def test_parses_online_transfer_debit(self):
+        result = parse_email("hdfc", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_account_online_transfer_debit_alert"
+        assert result.bank == "hdfc"
+        assert result.event_time_source == "message_arrival"
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("12345.67")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.account_mask == "XX0000"
+        assert result.transaction.counterparty == "Sample Payee"
+        assert result.transaction.channel == "online"
+
+    def test_no_reference_balance_or_date(self):
+        result = parse_email("hdfc", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.transaction.reference_number is None
+        assert result.transaction.balance is None
+        assert result.transaction.transaction_date is None
+        assert result.transaction.transaction_time is None
+
+    def test_does_not_shadow_neft_debit(self):
+        result = parse_email("hdfc", TestHdfcAccountNeftDebitParser.SAMPLE_HTML)
+        assert result.email_type == "hdfc_account_neft_debit_alert"
+
+    def test_does_not_shadow_ppf_transfer_debit(self):
+        result = parse_email("hdfc", TestHdfcAccountTransferDebitParser.SAMPLE_HTML)
+        assert result.email_type == "hdfc_account_transfer_debit_alert"
+
+    def test_truncated_body_raises(self):
+        html = """
+        <html><body>
+        HDFC BANK Dear Customer,
+        Rs. 12345.67 has been deducted from your Account No. ending in
+        </body></html>
+        """
+        with pytest.raises(ParseError):
+            parse_email("hdfc", html)
+
+
 class TestHdfcCardDebitAlertParser:
     """HDFC credit/debit card transaction alerts.
 
