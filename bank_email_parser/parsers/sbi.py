@@ -6,6 +6,7 @@ Supported email types:
 - sbi_cc_emandate_debit: Recurring e-mandate (Standing Instruction) debit success
 - sbi_cc_transaction_declined: Standing Instruction transaction declined (no funds moved)
 - sbi_dc_transaction_alert: Debit card POS/ECOM purchase alert
+- sbi_account_neft_credit: Savings account inbound NEFT credit
 - sbi_payment_ack: Credit card payment acknowledgment from BillDesk
 """
 
@@ -333,6 +334,96 @@ class SbiDcTransactionAlertParser(BaseEmailParser):
         )
 
 
+class SbiAccountNeftCreditParser(BaseEmailParser):
+    """SBI savings account inbound NEFT credit notification.
+
+    Matches the plain-text confirmation the bank sends when a NEFT lands in
+    the user's own account:
+
+      'Your account has been credited for NEFT received as per the details
+       given below Credited to Your A/c: XX9999 Amount: INR 12,345.00
+       UTR No.: SAMP1234A5678901 Date: 15/01/2026 Sent by: Mr SAMPLE SENDER
+       Sender Bank IFSC: SAMP0001234'
+
+    Money enters the account, so ``direction="credit"``. The sender is the
+    counterparty and the UTR is the reference, so a self-transfer from one of
+    the user's own accounts can dedupe against the matching outbound debit by
+    UTR. Each label is matched on its own anchor, so a reordered detail block
+    does not break the parse. The credited account and the UTR are required;
+    a missing one raises ``ParseError`` rather than storing ``None``.
+    """
+
+    bank = "sbi"
+    email_type = "sbi_account_neft_credit"
+
+    _ANCHOR = "credited for neft received"
+
+    _account_re = re.compile(r"Credited to Your A/c:\s*(\S+)")
+    _amount_re = re.compile(r"Amount:\s*INR\s*([\d,]+\.\d{2})")
+    _utr_re = re.compile(r"UTR No\.:\s*(\S+)")
+    _date_re = re.compile(r"Date:\s*(\d{2}/\d{2}/\d{4})")
+    # The sender name is captured only when the trailing "Sender Bank IFSC"
+    # marker bounds it, so the field cannot swallow following prose.
+    _sender_re = re.compile(r"Sent by:\s*(.+?)\s+Sender Bank IFSC")
+    _detail_re = re.compile(r"Credited to Your A/c:.*$")
+
+    @staticmethod
+    def _required_field(pattern: re.Pattern[str], text: str, label: str) -> str:
+        """Return a mandatory labelled value or raise ``ParseError``.
+
+        An empty field lets the ``\\S+`` capture grab the next label token,
+        which ends in ':'. Reject that value so a malformed email fails
+        loudly rather than storing a label as the field.
+        """
+        match = pattern.search(text)
+        value = match.group(1) if match else None
+        if not value or value.endswith(":"):
+            raise ParseError(f"Could not parse SBI NEFT credit {label}.")
+        return value
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if self._ANCHOR not in text.lower():
+            raise ParseError("Not an SBI account NEFT credit alert.")
+
+        if not (amount_match := self._amount_re.search(text)):
+            raise ParseError("Could not parse SBI NEFT credit amount.")
+        if (amount := parse_amount(amount_match.group(1))) is None:
+            raise ParseError(f"Could not parse amount: {amount_match.group(1)!r}")
+
+        # The date is a mandatory field of this shape. A value the regex
+        # accepted but the calendar rejects must fail loudly rather than
+        # silently drop a body-provided date.
+        if not (date_match := self._date_re.search(text)):
+            raise ParseError("Could not parse SBI NEFT credit date.")
+        if (txn_date := parse_date(date_match.group(1))) is None:
+            raise ParseError(f"Could not parse date: {date_match.group(1)!r}")
+
+        # Account and UTR are mandatory: the account is the credited leg and
+        # the UTR is the reference the reconciler pairs a self-transfer on.
+        account_mask = self._required_field(self._account_re, text, "credited account")
+        reference_number = self._required_field(self._utr_re, text, "UTR")
+
+        sender_match = self._sender_re.search(text)
+        detail_match = self._detail_re.search(text)
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                counterparty=sender_match.group(1).strip() if sender_match else None,
+                account_mask=account_mask,
+                reference_number=reference_number,
+                channel="neft",
+                raw_description=detail_match.group(0).strip() if detail_match else None,
+            ),
+        )
+
+
 class SbiPaymentAckParser(BaseEmailParser):
     """SBI Card payment acknowledgment from BillDesk.
 
@@ -412,6 +503,7 @@ _PARSERS = (
     # Debit card purchase: gated on the "using your SBI debit card" anchor
     # plus the label/value table, so it cannot shadow the CC shapes.
     SbiDcTransactionAlertParser(),
+    SbiAccountNeftCreditParser(),
     SbiPaymentAckParser(),
 )
 

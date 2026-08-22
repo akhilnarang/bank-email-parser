@@ -2842,3 +2842,79 @@ class TestSbiDcTransactionAlertParser:
         )
         result = parse_email("sbi", html)
         assert result.email_type == "sbi_cc_transaction_alert"
+
+
+class TestSbiAccountNeftCreditParser:
+    """SBI savings account inbound NEFT credit (plain-text detail block)."""
+
+    SAMPLE = (
+        "Dear Customer, Thank you for banking with State Bank of India. "
+        "Your account has been credited for NEFT received as per the details "
+        "given below Credited to Your A/c:  XX9999 Amount:  INR 12,345.00 "
+        "UTR No.:  SAMP1234A5678901 Date:  15/01/2026 "
+        "Sent by:  Mr SAMPLE SENDER Sender Bank IFSC:  SAMP0001234 "
+    )
+
+    def test_parses_credit(self):
+        result = parse_email("sbi", self.SAMPLE)
+        assert result.email_type == "sbi_account_neft_credit"
+        assert result.bank == "sbi"
+        txn = result.transaction
+        assert txn is not None
+        assert txn.direction == "credit"
+        assert txn.amount.amount == Decimal("12345.00")
+        assert txn.amount.currency == "INR"
+        assert txn.transaction_date == date(2026, 1, 15)
+        assert txn.counterparty == "Mr SAMPLE SENDER"
+        assert txn.account_mask == "XX9999"
+        assert txn.reference_number == "SAMP1234A5678901"
+        assert txn.channel == "neft"
+
+    def test_parses_reordered_detail_block(self):
+        """Each label is matched independently, so field order does not matter."""
+        reordered = (
+            "Your account has been credited for NEFT received as per the "
+            "details given below Date:  15/01/2026 Amount:  INR 12,345.00 "
+            "Sent by:  Mr SAMPLE SENDER Sender Bank IFSC:  SAMP0001234 "
+            "UTR No.:  SAMP1234A5678901 Credited to Your A/c:  XX9999 "
+        )
+        txn = parse_email("sbi", reordered).transaction
+        assert txn is not None
+        assert txn.amount.amount == Decimal("12345.00")
+        assert txn.reference_number == "SAMP1234A5678901"
+        assert txn.account_mask == "XX9999"
+
+    def test_rejects_missing_date(self):
+        html = self.SAMPLE.replace("Date:  15/01/2026 ", "")
+        with pytest.raises(ParseError):
+            parse_email("sbi", html)
+
+    def test_rejects_missing_utr(self):
+        """The UTR is the reconciler's dedup key, so its absence must fail."""
+        html = self.SAMPLE.replace("UTR No.:  SAMP1234A5678901 ", "")
+        with pytest.raises(ParseError):
+            parse_email("sbi", html)
+
+    def test_rejects_empty_utr_value(self):
+        """An empty UTR field must not capture the following label token."""
+        html = self.SAMPLE.replace("SAMP1234A5678901", "")
+        with pytest.raises(ParseError):
+            parse_email("sbi", html)
+
+    def test_missing_ifsc_does_not_overswallow_sender(self):
+        """Without the IFSC marker the sender is dropped, not over-captured."""
+        html = self.SAMPLE.replace("Sender Bank IFSC:  SAMP0001234 ", "")
+        txn = parse_email("sbi", html).transaction
+        assert txn is not None
+        assert txn.counterparty is None
+        assert txn.amount.amount == Decimal("12345.00")
+        assert txn.reference_number == "SAMP1234A5678901"
+
+    def test_rejects_cc_spend_email(self):
+        """The NEFT-credit parser must not shadow the CC spend shape."""
+        html = (
+            "<html><body><p>Rs.1,500.00 spent on your SBI Credit Card ending "
+            "1234 at SAMPLE MERCHANT on 15/01/26.</p></body></html>"
+        )
+        result = parse_email("sbi", html)
+        assert result.email_type == "sbi_cc_transaction_alert"
