@@ -3,6 +3,7 @@
 Supported email types:
 - hsbc_cc_debit_alert: Credit card purchase/spend alert
 - hsbc_cc_credit_alert: Credit card payment received
+- hsbc_cc_transaction_alert: Credit card purchase alert, 2026 wording
 """
 
 import re
@@ -109,8 +110,61 @@ class HsbcCcCreditAlertParser(BaseEmailParser):
         )
 
 
+class HsbcCcTransactionAlertParser(BaseEmailParser):
+    """HSBC credit card purchase alert, the wording in use from August 2026.
+
+    Matches:
+      'your HSBC Credit Card xx1234 was used for a transaction of INR 978.00
+       at SAMPLE MERCHANT on 26/08/26.'
+
+    The older alert names the card as 'ending with 1234' and carries a time.
+    This one masks the card as 'xx1234', dates it DD/MM/YY, and has no time.
+    """
+
+    bank = "hsbc"
+    email_type = "hsbc_cc_transaction_alert"
+
+    _pattern = re.compile(
+        r"your\s+HSBC\s+Credit\s+Card\s+[xX]+(?P<card>\d{4})\s+"
+        r"was\s+used\s+for\s+a\s+transaction\s+of\s+"
+        r"(?:INR|₹)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"at\s+(?P<merchant>.+?)\s+"
+        # The period closes the sentence. Without it a merchant name holding a
+        # date ("CAFE ON 01/02/26 ROAD") would end the match at the wrong date.
+        r"on\s+(?P<date>\d{1,2}/\d{1,2}/\d{2,4})\.",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse HSBC CC transaction alert.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        if (txn_date := parse_date(match.group("date"))) is None:
+            raise ParseError(f"Could not parse date: {match.group('date')!r}")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                counterparty=match.group("merchant").strip(),
+                card_mask=match.group("card"),
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 _PARSERS = (
     HsbcCcDebitAlertParser(),
+    HsbcCcTransactionAlertParser(),
     HsbcCcCreditAlertParser(),
 )
 

@@ -5,12 +5,15 @@ Supported email types:
 - icici_cc_upi_payment_alert: Credit card payment received via UPI
 - icici_cc_payment_alert: Credit card payment received
 - icici_bank_transfer_alert: Bank account IMPS/NEFT/RTGS transfer (debit)
+- icici_fund_transfer_alert: Internet-banking fund transfer to a payee (debit)
 - icici_net_banking_alert: Net banking payment (debit)
+- icici_account_transaction_alert: Savings account credit/debit alert
 - icici_cc_reversal: Credit card merchant reversal/refund (credit back to card)
 - icici_cc_usage_control_notice: Non-ledger card usage-settings confirmation
 """
 
 import re
+from typing import Literal
 
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
@@ -31,6 +34,11 @@ def _resolve_currency(raw: str) -> str:
 
 # Shared currency pattern: any 3-letter uppercase code, or Rs./₹
 _CUR = r"(?P<currency>[A-Z]{3}|Rs\.?|₹)"
+
+_DIRECTION_BY_VERB: dict[str, Literal["credit", "debit"]] = {
+    "credited": "credit",
+    "debited": "debit",
+}
 
 # ICICI netbanking alerts append "hours" to 24h times ('23:02 hours'); dateutil
 # doesn't understand that suffix, so strip it before parsing.
@@ -322,6 +330,133 @@ class IciciNetBankingAlertParser(BaseEmailParser):
         )
 
 
+class IciciFundTransferAlertParser(BaseEmailParser):
+    """ICICI internet-banking fund transfer alert.
+
+    Matches: 'You have made an online ICICI fund transfer payment of Rs. <amount>
+    towards <name> from your ICICI Bank Savings Account XXXX1234 on <date> at
+    <time>. The Transaction ID is <id>.'
+
+    The clause order differs from the IMPS/NEFT/RTGS alert: the account comes
+    before the date here, and after it there.
+    """
+
+    bank = "icici"
+    email_type = "icici_fund_transfer_alert"
+
+    _pattern = re.compile(
+        r"You\s+have\s+made\s+an\s+online\s+ICICI\s+fund\s+transfer\s+"
+        r"payment\s+of\s+"
+        rf"{_CUR}\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"towards\s+(?P<counterparty>.+?)\s+"
+        r"from\s+your\s+ICICI\s+Bank\s+\w+\s+Account\s+(?P<account>\w+)\s+"
+        r"on\s+(?P<date>(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s*\d{4}|\d{1,2}-\w{3}-\d{2,4})\s+"
+        r"at\s+(?P<time>\d{1,2}:\d{2}(?:\s*[apAP]\.?[mM]\.?)?)",
+    )
+
+    _txn_id_pattern = re.compile(
+        r"Transaction\s+ID\s+is\s+(?P<txn_id>[\w\-]+)",
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse ICICI fund transfer alert.")
+
+        currency = _resolve_currency(match.group("currency"))
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        transaction_date = _parse_icici_datetime(
+            match.group("date"), match.group("time")
+        )
+        if transaction_date is None:
+            raise ParseError(
+                f"Could not parse date/time: {match.group('date')!r} "
+                f"{match.group('time')!r}"
+            )
+
+        reference_number = None
+        if txn_match := self._txn_id_pattern.search(text):
+            reference_number = txn_match.group("txn_id")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount, currency=currency),
+                transaction_date=transaction_date.date(),
+                transaction_time=transaction_date.time(),
+                counterparty=match.group("counterparty").strip(),
+                account_mask=match.group("account"),
+                reference_number=reference_number,
+                channel="netbanking",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
+class IciciAccountTransactionAlertParser(BaseEmailParser):
+    """ICICI savings account credit/debit alert.
+
+    Matches: 'Your ICICI Bank Account XX214 has been credited with INR 91 on
+    30-Jun-26. Info: XX214:Int.Pd:30-03-2026 to 29-06-2026.'
+
+    The Info text is the account narration. It carries what the money was, so it
+    becomes the counterparty as well as the description.
+    """
+
+    bank = "icici"
+    email_type = "icici_account_transaction_alert"
+
+    _pattern = re.compile(
+        r"Your\s+ICICI\s+Bank\s+Account\s+(?P<account>\w+)\s+has\s+been\s+"
+        r"(?P<direction>credited|debited)\s+with\s+"
+        rf"{_CUR}\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"on\s+(?P<date>\d{1,2}-\w{3}-\d{2,4})",
+    )
+
+    # The narration ends at the first period that closes a sentence. Its own
+    # dots ("Int.Pd:") carry no space, so they do not end the capture.
+    _info_pattern = re.compile(
+        r"Info:\s*(?P<info>\S.*?)\.(?:\s|$)",
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse ICICI account transaction alert.")
+
+        currency = _resolve_currency(match.group("currency"))
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        if (transaction_date := parse_date(match.group("date"))) is None:
+            raise ParseError(f"Could not parse date: {match.group('date')!r}")
+
+        info = None
+        if info_match := self._info_pattern.search(text):
+            info = info_match.group("info").strip().rstrip(".") or None
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction=_DIRECTION_BY_VERB[match.group("direction")],
+                amount=Money(amount=amount, currency=currency),
+                transaction_date=transaction_date,
+                counterparty=info,
+                account_mask=match.group("account"),
+                raw_description=info or match.group(0).strip(),
+            ),
+        )
+
+
 class IciciCcReversalParser(BaseEmailParser):
     """ICICI credit card merchant reversal/refund alert.
 
@@ -415,7 +550,9 @@ _PARSERS = (
     IciciCcUpiPaymentAlertParser(),
     IciciCcPaymentAlertParser(),
     IciciBankTransferAlertParser(),
+    IciciFundTransferAlertParser(),
     IciciNetBankingAlertParser(),
+    IciciAccountTransactionAlertParser(),
     IciciCcReversalParser(),
     IciciCcUsageControlNoticeParser(),
     IciciStatementEmailParser(),
