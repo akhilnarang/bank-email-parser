@@ -34,6 +34,9 @@ class HdfcUpiAlertParser(BaseEmailParser):
     Matches:
       'Rs.X has been debited from account XXXX to VPA ... on DD-MM-YY.'
       'Rs.X has been credited to account XXXX from VPA ... on DD-MM-YY.'
+      'Rs.X has been successfully credited to your HDFC Bank account ending
+       in XXXX. Transaction Details: a. Date: DD-MM-YY b. Sender: ... (VPA: ...)
+       c. UPI Reference No.: N'
     """
 
     bank = "hdfc"
@@ -69,11 +72,28 @@ class HdfcUpiAlertParser(BaseEmailParser):
         r"on\s+(?P<date>[\d\-]+)\.",
     )
 
+    # Itemised credit (observed May 2026). The sender and VPA sit in a
+    # lettered list after the sentence, and the VPA is in parentheses:
+    #   "Rs.5000.00 has been successfully credited to your HDFC Bank
+    #    account ending in 1234. Transaction Details: a. Date: 13-05-26
+    #    b. Sender: SAMPLE SENDER (VPA: sample@bank)
+    #    c. UPI Reference No.: 123456789012"
+    _credit_itemised_pattern = re.compile(
+        r"Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"has\s+been\s+successfully\s+credited\s+to\s+your\s+HDFC\s+Bank\s+"
+        r"account\s+ending\s+in\s+(?P<account>\w+)\.\s*"
+        r"Transaction\s+Details:\s*a\.\s*Date:\s*(?P<date>[\d\-]+)\s+"
+        r"b\.\s*Sender:\s*(?P<counterparty>.+?)\s*\(VPA:\s*(?P<vpa>[^)\s]+)\)",
+    )
+
     # Reference label varies between formats:
-    #   classic: "Your UPI transaction reference number is 123456789012"
-    #   newer:   "UPI transaction reference no.: 612853660835"
+    #   classic:  "Your UPI transaction reference number is 123456789012"
+    #   newer:    "UPI transaction reference no.: 612853660835"
+    #   itemised: "c. UPI Reference No.: 051778616809"
     _ref_pattern = re.compile(
-        r"UPI\s+transaction\s+reference\s+(?:number\s+is|no\.?:?)\s+(?P<ref>\d+)",
+        r"UPI\s+(?:transaction\s+)?reference\s+(?:number\s+is|no\.?:?)\s+"
+        r"(?P<ref>\d+)",
+        re.IGNORECASE,
     )
 
     def parse(self, html: str) -> ParsedEmail:
@@ -84,6 +104,8 @@ class HdfcUpiAlertParser(BaseEmailParser):
         elif match := self._credit_pattern.search(text):
             direction = "credit"
         elif match := self._credit_alt_pattern.search(text):
+            direction = "credit"
+        elif match := self._credit_itemised_pattern.search(text):
             direction = "credit"
         else:
             raise ParseError("Could not parse HDFC UPI alert.")

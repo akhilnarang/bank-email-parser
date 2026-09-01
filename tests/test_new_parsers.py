@@ -1350,6 +1350,38 @@ class TestHdfcUpiAlertParser:
         assert result.transaction.transaction_date.month == 5
         assert result.transaction.transaction_date.day == 8
 
+    def test_parses_itemised_credit_format(self):
+        """Third credit wording (observed May 2026). The sentence names no
+        sender; the sender, VPA and reference sit in a lettered list after
+        it, the VPA is in parentheses, and the reference label is ``UPI
+        Reference No.:``. The parser must read the sender from the list,
+        not from the sentence."""
+        html = """
+        <html><body>
+        Dear Customer, Greetings from HDFC Bank!
+        We're writing to inform you that Rs.5000.00 has been successfully
+        credited to your HDFC Bank account ending in 1234.
+        Transaction Details:
+        a. Date: 13-05-26
+        b. Sender: SAMPLE SENDER PRIVATE LIMITED (VPA: sample.sender@bank)
+        c. UPI Reference No.: 100200300400
+        Need Help? India (Toll-Free): 1800 000 0000
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_upi_alert"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("5000.00")
+        assert result.transaction.account_mask == "1234"
+        assert result.transaction.counterparty == "SAMPLE SENDER PRIVATE LIMITED"
+        assert result.transaction.reference_number == "100200300400"
+        assert result.transaction.channel == "upi"
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 5
+        assert result.transaction.transaction_date.day == 13
+
 
 class TestHdfcRupayUpiDebitParser:
     """Test HDFC RuPay credit card UPI debit alerts."""
