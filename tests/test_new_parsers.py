@@ -1544,6 +1544,40 @@ class TestHdfcAccountCreditAlertParser:
         assert result.transaction.transaction_date.month == 6
         assert result.transaction.transaction_date.day == 29
 
+    def test_parses_fund_transfer_credit(self):
+        """The "successfully added ... from FT-" wording (observed May 2026).
+        There is no reference. The whole narration after ``FT-`` is the
+        counterparty, as the SMS twin reads it, and the channel is
+        ``imps``. The amount is written with a double currency marker,
+        ``Rs.INR 45,000.00``."""
+        html = """
+        <html><body>
+        Dear Customer, Greetings from HDFC Bank!
+        Rs.INR 45,000.00 has been successfully added to your account ending
+        XX0000 from FT- CUSTOMER NAME-XXXXXXXXXX0000 - SAMPLE REMITTER LIMITED
+        on 16-MAY-2026. The available balance in your account is Rs. INR 58,000.00
+        The balance in the account does not include uncleared cheque amount, if any.
+        </body></html>
+        """
+        result = parse_email("hdfc", html)
+        assert result.transaction is not None
+        assert result.email_type == "hdfc_account_credit_alert"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("45000.00")
+        assert result.transaction.account_mask == "XX0000"
+        assert (
+            result.transaction.counterparty
+            == "CUSTOMER NAME-XXXXXXXXXX0000 - SAMPLE REMITTER LIMITED"
+        )
+        assert result.transaction.reference_number is None
+        assert result.transaction.channel == "imps"
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("58000.00")
+        assert result.transaction.transaction_date is not None
+        assert result.transaction.transaction_date.year == 2026
+        assert result.transaction.transaction_date.month == 5
+        assert result.transaction.transaction_date.day == 16
+
     def test_hyphenated_remitter_stays_intact(self):
         html = """
         <html><body>

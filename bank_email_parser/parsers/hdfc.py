@@ -524,6 +524,12 @@ class HdfcAccountCreditAlertParser(BaseEmailParser):
     The NEFT reference is structured ``<route>-<remitter>-<beneficiary>
     -<UTR>``. The remitter (first dash-segment after the route code) is the
     counterparty; the beneficiary is the user. ``channel`` is ``neft``.
+
+    Also matches the fund-transfer wording:
+      'Rs.INR 100.00 has been successfully added to your account ending
+       XX0000 from FT- <narration> on 16-MAY-2026. The available balance
+       in your account is Rs. INR 200.00'
+    The narration after ``FT-`` is the counterparty. ``channel`` is ``imps``.
     """
 
     bank = "hdfc"
@@ -544,10 +550,33 @@ class HdfcAccountCreditAlertParser(BaseEmailParser):
         re.IGNORECASE | re.DOTALL,
     )
 
+    # Fund-transfer credit (observed May 2026). It carries no reference.
+    # The narration after "FT-" is the counterparty, as the SMS twin of this
+    # alert reads it. "FT-" is HDFC's tag for an inbound fund transfer, so
+    # the channel is ``imps``:
+    #   "Rs.INR 100.00 has been successfully added to your account ending
+    #    XX0000 from FT- CUSTOMER NAME-XXXXXXXXXX0000 - REMITTER NAME on
+    #    16-MAY-2026. The available balance in your account is Rs. INR 200.00"
+    _ft_pattern = re.compile(
+        r"Rs\.?\s*INR\s+(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"has\s+been\s+successfully\s+added\s+to\s+your\s+account\s+"
+        r"ending\s+(?P<account>\w+)\s+from\s+FT-\s*(?P<counterparty>.+?)\s+"
+        r"on\s+(?P<date>\d{1,2}-[A-Za-z]+-\d{4})\.\s*"
+        r"The\s+available\s+balance\s+in\s+your\s+account\s+is\s+"
+        r"Rs\.?\s*INR\s+(?P<balance>[\d,]+(?:\.\d+)?)",
+        re.IGNORECASE,
+    )
+
     def parse(self, html: str) -> ParsedEmail:
         _, text = self.prepare_html(html)
 
-        if not (match := self._pattern.search(text)):
+        if match := self._pattern.search(text):
+            channel = "neft"
+            reference_number: str | None = match.group("ref").strip()
+        elif match := self._ft_pattern.search(text):
+            channel = "imps"
+            reference_number = None
+        else:
             raise ParseError("Could not parse HDFC account credit alert.")
 
         if (amount := parse_amount(match.group("amount"))) is None:
@@ -564,9 +593,9 @@ class HdfcAccountCreditAlertParser(BaseEmailParser):
                 transaction_date=parse_date(match.group("date")),
                 counterparty=match.group("counterparty").strip(),
                 account_mask=match.group("account"),
-                reference_number=match.group("ref").strip(),
+                reference_number=reference_number,
                 balance=Money(amount=balance) if balance is not None else None,
-                channel="neft",
+                channel=channel,
                 raw_description=match.group(0).strip(),
             ),
         )
