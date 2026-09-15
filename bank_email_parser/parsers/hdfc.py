@@ -621,10 +621,16 @@ class HdfcAccountNeftDebitParser(BaseEmailParser):
     pairs, the email and the SMS arrive -5 to +14 seconds apart. Thus
     ``event_time_source`` is ``message_arrival``, and the consumer can use
     the time of arrival in place of the time of the event.
+
+
+    HDFC prints the payee label that the user saved in net banking, not
+    the name of the account holder. So ``counterparty_source`` is
+    ``user_alias``.
     """
 
     bank = "hdfc"
     email_type = "hdfc_account_neft_debit_alert"
+    counterparty_source = "user_alias"
     event_time_source = "message_arrival"
 
     # This pattern needs the words "to payee <name> via NEFT". Thus it does
@@ -683,10 +689,16 @@ class HdfcAccountOnlineTransferDebitParser(BaseEmailParser):
     HDFC sends this email at the moment of the transaction. Thus
     ``event_time_source`` is ``message_arrival``, and the consumer must
     trust the time less than a time that the bank writes.
+
+
+    HDFC prints the payee label that the user saved in net banking, not
+    the name of the account holder. So ``counterparty_source`` is
+    ``user_alias``.
     """
 
     bank = "hdfc"
     email_type = "hdfc_account_online_transfer_debit_alert"
+    counterparty_source = "user_alias"
     event_time_source = "message_arrival"
 
     _pattern = re.compile(
@@ -745,10 +757,16 @@ class HdfcAccountRtgsInitiatedDebitParser(BaseEmailParser):
     The email has no balance, no date, and no time. These fields stay
     empty. HDFC sends the email at the moment of the transaction, so
     ``event_time_source`` is ``message_arrival``.
+
+
+    HDFC prints the payee label that the user saved in net banking, not
+    the name of the account holder. So ``counterparty_source`` is
+    ``user_alias``.
     """
 
     bank = "hdfc"
     email_type = "hdfc_account_rtgs_debit_alert"
+    counterparty_source = "user_alias"
     event_time_source = "message_arrival"
 
     _pattern = re.compile(

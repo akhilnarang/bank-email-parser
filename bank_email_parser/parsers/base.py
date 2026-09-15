@@ -42,12 +42,19 @@ class BaseEmailParser(ABC):
     of the card bill and gives the card mask. Set it to ``none`` when the
     bank sends no field that shows which event the message reports. See
     ``ParsedEmail`` for what the consumer does with each value.
+
+    Set ``counterparty_source`` to ``user_alias`` when the counterparty comes
+    from a label that the user chose, such as the payee nickname that HDFC
+    prints for a savings-account transfer. The bank does not state the name
+    of the account holder in such a message. Leave it at ``bank`` when the
+    bank states the name or the merchant itself.
     """
 
     bank: str
     email_type: str
     event_time_source: Literal["body", "message_arrival"] = "body"
     identifies_by: Literal["counterparty", "card_mask", "none"] = "counterparty"
+    counterparty_source: Literal["bank", "user_alias"] = "bank"
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -55,8 +62,16 @@ class BaseEmailParser(ABC):
         # abstract intermediate. A class that defines only event_time_source
         # must still get a check. Without it, a wrong value goes to the
         # consumer, and the consumer reads that value as "body".
-        if not (cls.__dict__.keys()
-            & {"bank", "email_type", "event_time_source", "identifies_by"}):
+        if not (
+            cls.__dict__.keys()
+            & {
+                "bank",
+                "email_type",
+                "event_time_source",
+                "identifies_by",
+                "counterparty_source",
+            }
+        ):
             return
         # A class can inherit bank or email_type from a parent. Both values
         # must still resolve to a string.
@@ -81,6 +96,11 @@ class BaseEmailParser(ABC):
             raise TypeError(
                 f"{cls.__name__} must define 'identifies_by' as "
                 "'counterparty', 'card_mask' or 'none'"
+            )
+        if getattr(cls, "counterparty_source", None) not in ("bank", "user_alias"):
+            raise TypeError(
+                f"{cls.__name__} must define 'counterparty_source' as "
+                "'bank' or 'user_alias'"
             )
 
     @staticmethod
@@ -164,6 +184,7 @@ def parse_with_parsers(
                 # which class matched.
                 result.event_time_source = parser.event_time_source
                 result.identifies_by = parser.identifies_by
+                result.counterparty_source = parser.counterparty_source
                 # Success — but warn about any unexpected errors from earlier parsers
                 if unexpected_errors:
                     warning = (

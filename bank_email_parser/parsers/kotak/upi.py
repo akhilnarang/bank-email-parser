@@ -120,7 +120,9 @@ class KotakUpiCreditParser(BaseEmailParser):
         if not (amount_match := self._amount_pattern.search(summary)):
             raise ParseError("Could not find amount in Kotak UPI credit email.")
         if (amount := parse_amount(amount_match.group("amount"))) is None:
-            raise ParseError(f"Could not parse amount: {amount_match.group('amount')!r}")
+            raise ParseError(
+                f"Could not parse amount: {amount_match.group('amount')!r}"
+            )
 
         sender_match = self._sender_pattern.search(summary)
         counterparty = sender_match.group("sender").strip() if sender_match else ""
