@@ -27,8 +27,8 @@ class ParserContext:
 _thread_local = threading.local()
 
 
-# What a parser declares about the message it reads. A class that sets any
-# of these gets validated.
+# All five, not just bank and email_type: a subclass can inherit those and
+# still set a wrong literal.
 _DECLARED_FACTS = frozenset(
     {"bank", "email_type", "event_time_source", "identifies_by", "counterparty_source"}
 )
@@ -65,10 +65,7 @@ class BaseEmailParser(ABC):
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
-        # An abstract intermediate declares nothing about a message. It holds
-        # shared extraction for its subclasses, so it gets no check. A class
-        # that declares even one value gets the full check: a subclass can
-        # inherit bank and email_type and still set a wrong literal.
+        # Abstract intermediates set none of these and need no check.
         if not (cls.__dict__.keys() & _DECLARED_FACTS):
             return
         # A class can inherit bank or email_type from a parent. Both values
