@@ -27,6 +27,13 @@ class ParserContext:
 _thread_local = threading.local()
 
 
+# What a parser declares about the message it reads. A class that sets any
+# of these gets validated.
+_DECLARED_FACTS = frozenset(
+    {"bank", "email_type", "event_time_source", "identifies_by", "counterparty_source"}
+)
+
+
 class BaseEmailParser(ABC):
     """The base class for one email shape from one bank.
 
@@ -58,20 +65,11 @@ class BaseEmailParser(ABC):
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
-        # Skip a class that defines none of these. Such a class is an
-        # abstract intermediate. A class that defines only event_time_source
-        # must still get a check. Without it, a wrong value goes to the
-        # consumer, and the consumer reads that value as "body".
-        if not (
-            cls.__dict__.keys()
-            & {
-                "bank",
-                "email_type",
-                "event_time_source",
-                "identifies_by",
-                "counterparty_source",
-            }
-        ):
+        # An abstract intermediate declares nothing about a message. It holds
+        # shared extraction for its subclasses, so it gets no check. A class
+        # that declares even one value gets the full check: a subclass can
+        # inherit bank and email_type and still set a wrong literal.
+        if not (cls.__dict__.keys() & _DECLARED_FACTS):
             return
         # A class can inherit bank or email_type from a parent. Both values
         # must still resolve to a string.
@@ -83,21 +81,17 @@ class BaseEmailParser(ABC):
             raise TypeError(
                 f"{cls.__name__} must define an 'email_type: str' class attribute"
             )
-        if getattr(cls, "event_time_source", None) not in ("body", "message_arrival"):
+        if cls.event_time_source not in ("body", "message_arrival"):
             raise TypeError(
                 f"{cls.__name__} must define 'event_time_source' as "
                 "'body' or 'message_arrival'"
             )
-        if getattr(cls, "identifies_by", None) not in (
-            "counterparty",
-            "card_mask",
-            "none",
-        ):
+        if cls.identifies_by not in ("counterparty", "card_mask", "none"):
             raise TypeError(
                 f"{cls.__name__} must define 'identifies_by' as "
                 "'counterparty', 'card_mask' or 'none'"
             )
-        if getattr(cls, "counterparty_source", None) not in ("bank", "user_alias"):
+        if cls.counterparty_source not in ("bank", "user_alias"):
             raise TypeError(
                 f"{cls.__name__} must define 'counterparty_source' as "
                 "'bank' or 'user_alias'"
