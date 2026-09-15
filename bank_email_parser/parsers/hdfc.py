@@ -11,6 +11,8 @@ Supported email types:
 - hdfc_account_credit_alert: Savings-account inbound NEFT credit
 - hdfc_account_neft_debit_alert: Savings-account outward NEFT debit
 - hdfc_account_online_transfer_debit_alert: Savings-account net-banking payee transfer debit (no rail named)
+- hdfc_account_rtgs_debit_alert: Savings-account outward RTGS debit, submission leg
+- hdfc_account_rtgs_completed_alert: Outward RTGS settlement leg (carries the reference)
 """
 
 import re
@@ -721,6 +723,152 @@ class HdfcAccountOnlineTransferDebitParser(BaseEmailParser):
         )
 
 
+class HdfcAccountRtgsInitiatedDebitParser(BaseEmailParser):
+    """HDFC savings account outward RTGS debit alert ("initiated").
+
+    This parser reads: 'You have successfully initiated a RTGS transaction
+    of Rs. 99,999.99 from your HDFC Bank A/c XX0000 for a transfer to
+    payee Sample Payee using HDFC Bank Online Banking.'
+
+    HDFC sends two emails per RTGS transfer. This one is the submission
+    leg. It names the source account and the payee, and it carries no
+    reference number. The bank sends a second email when the transfer
+    settles (``HdfcAccountRtgsCompletedParser``). That one carries the
+    reference number and the beneficiary account, and it names no source
+    account.
+
+    This leg is the one that the ledger records, because it names the
+    account that the money leaves. The same split holds on the SMS side:
+    ``hdfc_account_rtgs_debit_alert`` is the row and the settlement leg
+    only completes it.
+
+    The email has no balance, no date, and no time. These fields stay
+    empty. HDFC sends the email at the moment of the transaction, so
+    ``event_time_source`` is ``message_arrival``.
+    """
+
+    bank = "hdfc"
+    email_type = "hdfc_account_rtgs_debit_alert"
+    event_time_source = "message_arrival"
+
+    _pattern = re.compile(
+        r"initiated\s+a\s+RTGS\s+transaction\s+of\s+"
+        r"Rs\.?\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"from\s+your\s+HDFC\s+Bank\s+A/c\s+(?P<account>\w+)\s+"
+        r"for\s+a\s+transfer\s+to\s+payee\s+(?P<counterparty>.+?)\s+"
+        r"using\s+HDFC\s+Bank\s+Online\s+Banking",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse HDFC account RTGS initiated debit alert.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                counterparty=_clean_counterparty(match.group("counterparty")),
+                account_mask=match.group("account"),
+                channel="rtgs",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
+class HdfcAccountRtgsCompletedParser(BaseEmailParser):
+    """HDFC outward RTGS settlement alert ("transfer has been completed").
+
+    This parser reads: 'Your RTGS transfer has been completed successfully.
+    Transaction Details: Amount: INR 99,999.99 Credited to beneficiary
+    A/c ending: XX0000 Date & Time: 15-01-2026 at 10:30:00 Reference
+    Number: HDFCR00000000000000000'
+
+    This is the settlement leg of the transfer that
+    ``HdfcAccountRtgsInitiatedDebitParser`` reports. It carries the
+    reference number, the beneficiary account, and an exact date and time.
+    It names no source account.
+
+    The two emails are one debit. The submission leg is the row that the
+    ledger holds. This leg only supplies the reference number and the
+    exact time.
+
+    ``ledger_role`` is ``completion``: this leg opens no row of its own.
+    The consumer stamps the reference onto the row that the submission leg
+    opened. The fuzzy matcher cannot pair the two legs, because the
+    submission takes its time from the arrival of the message and that
+    gives it a one-minute window, while a settlement follows minutes
+    later. The completion path matches on the reference and the amount
+    instead, so the gap does not matter.
+
+    The parser sets no ``account_mask``. The body names the beneficiary
+    account and not the source account, and a mask that disagrees would
+    make the reconciler call this a new event. The mask stays in
+    ``raw_description``.
+    """
+
+    bank = "hdfc"
+    email_type = "hdfc_account_rtgs_completed_alert"
+
+    # Each span is bounded: an unbounded ``.*?`` chain backtracks for
+    # seconds on a body that repeats the details block and drops a label.
+    _pattern = re.compile(
+        r"RTGS\s+transfer\s+has\s+been\s+completed\s+successfully\.?"
+        r".{0,400}?Amount:\s*(?:INR|Rs\.?)\s*(?P<amount>[\d,]+(?:\.\d+)?)"
+        r".{0,200}?Credited\s+to\s+beneficiary\s+A/c\s+ending:\s*(?P<account>\w+)"
+        r".{0,200}?Date\s*&\s*Time:\s*(?P<date>[\d\-/]+)\s+at\s+(?P<time>[\d:]+)"
+        # The reference needs a digit. The pattern compiles with IGNORECASE,
+        # so letters alone would take a footer word like "Sincerely".
+        r".{0,200}?Reference\s+Number:\s*(?P<ref>(?=[A-Z0-9]{8,})[A-Z]*[0-9][A-Z0-9]*)",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse HDFC account RTGS completed alert.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        txn_date = None
+        txn_time = None
+        if dt := parse_datetime(f"{match.group('date')} {match.group('time')}"):
+            txn_date = dt.date()
+            txn_time = dt.time()
+        else:
+            txn_date = parse_date(match.group("date"))
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            ledger_role="completion",
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=amount),
+                transaction_date=txn_date,
+                transaction_time=txn_time,
+                reference_number=match.group("ref"),
+                # No account_mask: the body names the beneficiary, not the
+                # source. A disagreeing mask empties the candidate set, and
+                # an empty set makes a second debit row.
+                channel="rtgs",
+                raw_description=(
+                    f"beneficiary_account={match.group('account')} "
+                    f"{match.group(0).strip()}"
+                ),
+            ),
+        )
+
+
 class HdfcStatementEmailParser(BaseEmailParser):
     """HDFC account statement email."""
 
@@ -754,6 +902,12 @@ _PARSERS = (
     HdfcAccountCreditAlertParser(),
     HdfcAccountNeftDebitParser(),
     HdfcAccountOnlineTransferDebitParser(),
+    # RTGS: the submission leg names the source account, the settlement leg
+    # names the reference. Anchored on distinct phrases ("initiated a RTGS
+    # transaction" / "RTGS transfer has been completed"), so order between
+    # the two is not load-bearing.
+    HdfcAccountRtgsInitiatedDebitParser(),
+    HdfcAccountRtgsCompletedParser(),
     HdfcStatementEmailParser(),
 )
 

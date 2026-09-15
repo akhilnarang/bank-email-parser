@@ -2743,7 +2743,14 @@ class TestKotakUpiCreditParser:
             "Amount: ₹1.00 UPI Reference Number (RRN): 111222333 "
             "Sender: SAMPLE NAME " + "footer " * 30,
         ],
-        ids=["no-sender", "empty-sender", "no-rrn", "no-date", "bad-date", "footer-bleed"],
+        ids=[
+            "no-sender",
+            "empty-sender",
+            "no-rrn",
+            "no-date",
+            "bad-date",
+            "footer-bleed",
+        ],
     )
     def test_rejects_incomplete_or_malformed_credit(self, body):
         with pytest.raises(ParseError):
@@ -2984,3 +2991,251 @@ class TestSbiAccountNeftCreditParser:
         )
         result = parse_email("sbi", html)
         assert result.email_type == "sbi_cc_transaction_alert"
+
+
+class TestHdfcAccountRtgsInitiatedDebit:
+    """HDFC outward RTGS submission leg: the row that the ledger holds."""
+
+    SAMPLE = (
+        "<html><body><p>Dear Customer, Thank you for banking with HDFC Bank. "
+        "You have successfully initiated a RTGS transaction of Rs. 99,999.99 "
+        "from your HDFC Bank A/c XX0000 for a transfer to payee Sample Payee "
+        "using HDFC Bank Online Banking. Not you? Call 00000000000/SMS "
+        "'BLOCK OB' to 0000000000 from your registered mobile number."
+        "</p></body></html>"
+    )
+
+    def test_parses_the_submission_leg(self):
+        result = parse_email("hdfc", self.SAMPLE)
+        assert result.email_type == "hdfc_account_rtgs_debit_alert"
+        txn = result.transaction
+        assert txn is not None
+        assert txn.direction == "debit"
+        assert txn.amount.amount == Decimal("99999.99")
+        assert txn.account_mask == "XX0000"
+        assert txn.counterparty == "Sample Payee"
+        assert txn.channel == "rtgs"
+
+    def test_carries_no_reference(self):
+        """The submission leg has no UTR. The settlement leg supplies it."""
+        txn = parse_email("hdfc", self.SAMPLE).transaction
+        assert txn is not None
+        assert txn.reference_number is None
+
+    def test_takes_its_time_from_arrival(self):
+        """The body has no date or time, so the consumer uses arrival."""
+        result = parse_email("hdfc", self.SAMPLE)
+        assert result.event_time_source == "message_arrival"
+        txn = result.transaction
+        assert txn is not None
+        assert txn.transaction_date is None
+
+    def test_does_not_take_the_neft_shape(self):
+        """A NEFT debit must keep its own email_type."""
+        html = (
+            "<html><body><p>Rs. 1234.56 has been deducted from your HDFC Bank "
+            "account ending in XX0000 for a transfer to payee Sample Payee via "
+            "NEFT using HDFC Bank Online Banking.</p></body></html>"
+        )
+        assert parse_email("hdfc", html).email_type == "hdfc_account_neft_debit_alert"
+
+
+class TestHdfcAccountRtgsCompleted:
+    """HDFC outward RTGS settlement leg: it carries the reference."""
+
+    SAMPLE = (
+        "<html><body><p>Dear Customer, Greetings from HDFC Bank! Important "
+        "Note: Your RTGS transfer has been completed successfully. We know "
+        "timely updates matter, and we are happy to confirm this for you. "
+        "Transaction Details: Amount: INR 99,999.99 Credited to beneficiary "
+        "A/c ending: XX1111 Date &amp; Time: 15-01-2026 at 10:30:00 Reference "
+        "Number: SAMPLER00000000000000 Thank you for banking with us."
+        "</p></body></html>"
+    )
+
+    def test_parses_the_settlement_leg(self):
+        result = parse_email("hdfc", self.SAMPLE)
+        assert result.email_type == "hdfc_account_rtgs_completed_alert"
+        txn = result.transaction
+        assert txn is not None
+        assert txn.amount.amount == Decimal("99999.99")
+        assert txn.reference_number == "SAMPLER00000000000000"
+        assert txn.channel == "rtgs"
+
+    def test_reads_the_exact_date_and_time(self):
+        """The settlement leg is the only leg that states a time."""
+        txn = parse_email("hdfc", self.SAMPLE).transaction
+        assert txn is not None
+        assert txn.transaction_date == date(2026, 1, 15)
+        assert txn.transaction_time == time(10, 30, 0)
+
+    def test_sets_no_account_mask(self):
+        """The body names the beneficiary account, not the source account.
+
+        The reconciler drops every candidate whose stored mask disagrees
+        with the incoming mask. A beneficiary mask would empty the
+        candidate set, and an empty set makes the reconciler call the
+        event new and insert a SECOND debit for one transfer.
+        """
+        txn = parse_email("hdfc", self.SAMPLE).transaction
+        assert txn is not None
+        assert txn.account_mask is None
+
+    def test_keeps_the_beneficiary_account_for_debugging(self):
+        """The mask still reaches raw_description, which dumps exclude."""
+        txn = parse_email("hdfc", self.SAMPLE).transaction
+        assert txn is not None
+        assert "XX1111" in (txn.raw_description or "")
+
+    def test_rejects_a_reference_that_is_footer_text(self):
+        """An empty reference field must not capture the next word.
+
+        The reconciler reads the reference as the identity of the event,
+        so a word of boilerplate there would match the wrong row.
+        """
+        html = self.SAMPLE.replace(
+            "Reference Number: SAMPLER00000000000000",
+            "Reference Number: Thank you for banking with us",
+        )
+        with pytest.raises(ParseError):
+            parse_email("hdfc", html)
+
+    def test_rejects_a_body_without_the_reference(self):
+        """The reference is the only field this leg exists to supply."""
+        html = self.SAMPLE.replace("Reference Number: SAMPLER00000000000000 ", "")
+        with pytest.raises(ParseError):
+            parse_email("hdfc", html)
+
+
+class TestIdfcCcReversal:
+    """IDFC CC reversal, including the foreign-currency case."""
+
+    SAMPLE = (
+        "<html><body><p>Dear Cardmember, Transaction of SGD 99.99 done at "
+        "SAMPLE MERCHANT on 15 JAN 2026 has been reversed to your IDFC FIRST "
+        "Bank Credit Card ending XX0000. As per regulatory guidelines, if you "
+        "have already paid for this transaction you may request for a refund "
+        "of this amount in your bank account by calling us. Kindly note, in "
+        "cases where the refund value amounts is Rs 50,000 or above, it is "
+        "mandatory to share your most recent bank statement, for verification "
+        "of account details. Do not share your Card Number, CVV, PIN, OTP, "
+        "Internet Banking User ID and Password with anyone."
+        "</p></body></html>"
+    )
+
+    def test_parses_a_foreign_currency_reversal(self):
+        result = parse_email("idfc", self.SAMPLE)
+        assert result.email_type == "idfc_cc_reversal_alert"
+        txn = result.transaction
+        assert txn is not None
+        assert txn.direction == "credit"
+        assert txn.amount.amount == Decimal("99.99")
+        assert txn.counterparty == "SAMPLE MERCHANT"
+        assert txn.card_mask == "XX0000"
+
+    def test_keeps_the_currency_the_bank_writes(self):
+        """The body carries no INR value, so the parser must not claim one."""
+        txn = parse_email("idfc", self.SAMPLE).transaction
+        assert txn is not None
+        assert txn.amount.currency == "SGD"
+
+    def test_parses_an_inr_reversal(self):
+        html = self.SAMPLE.replace("SGD 99.99", "INR 500.00")
+        txn = parse_email("idfc", html).transaction
+        assert txn is not None
+        assert txn.amount.currency == "INR"
+        assert txn.amount.amount == Decimal("500.00")
+
+    def test_is_not_taken_by_the_statement_stub(self):
+        """The body names a "bank statement" and a "Password".
+
+        Those two words once let the statement stub claim this email and
+        drop the transaction.
+        """
+        result = parse_email("idfc", self.SAMPLE)
+        assert result.email_type != "idfc_account_statement"
+        assert result.transaction is not None
+
+
+class TestIdfcStatementStubStillMatches:
+    """The tightened statement anchor must keep real statements."""
+
+    def test_account_statement(self):
+        html = (
+            "<html><body><p>Your Account Statement for the month of August "
+            "2026 is attached. The password to open the statement is your "
+            "date of birth in DDMMYYYY format.</p></body></html>"
+        )
+        assert parse_email("idfc", html).email_type == "idfc_account_statement"
+
+    def test_credit_card_statement_at_a_glance(self):
+        html = (
+            "<html><body><p>Here's your FIRST Wealth Credit Card statement at "
+            "a glance for card ending with XXXX0000: Statement Date 24/Jan/2026 "
+            "Total Amount Due 1,234.00 Payment Due Date 08/Feb/2026. To access "
+            "your e-statement, open the PDF file provided in this email. You "
+            "will be prompted to enter a password to open the attachment."
+            "</p></body></html>"
+        )
+        assert parse_email("idfc", html).email_type == "idfc_account_statement"
+
+
+class TestIdfcStatementAnchorStaysTight:
+    """The statement anchor must not re-admit alert boilerplate.
+
+    Every IDFC alert warns about a "Password", and a reversal names a
+    "bank statement". The pair of words alone once let the statement stub
+    claim a reversal and drop its transaction.
+    """
+
+    def test_comma_less_boilerplate_is_not_a_statement(self):
+        """The anchor must reject the boilerplate on its own merit.
+
+        The reversal parser runs earlier and would catch a real reversal,
+        but the stub must not depend on that order.
+        """
+        html = (
+            "<html><body><p>Please share your bank statement for "
+            "verification. Do not share your Password with anyone."
+            "</p></body></html>"
+        )
+        with pytest.raises(ParseError):
+            parse_email("idfc", html)
+
+    def test_attached_your_statement_is_a_statement(self):
+        """A bare "your statement" names the statement as the subject."""
+        html = (
+            "<html><body><p>Please find attached your statement. The "
+            "password is your date of birth.</p></body></html>"
+        )
+        assert parse_email("idfc", html).email_type == "idfc_account_statement"
+
+    def test_reversal_boilerplate_is_not_a_statement(self):
+        html = (
+            "<html><body><p>Dear Cardmember, Some alert text. Kindly note, in "
+            "cases where the refund value amounts is Rs 50,000 or above, it is "
+            "mandatory to share your most recent bank statement, for "
+            "verification of account details. Do not share your Card Number, "
+            "CVV, PIN, OTP, Internet Banking User ID and Password with anyone."
+            "</p></body></html>"
+        )
+        with pytest.raises(ParseError):
+            parse_email("idfc", html)
+
+
+class TestIdfcStatementAttachmentWordings:
+    """The anchor must read either word order, and hyphenated modifiers."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "Please find the statement attached.",
+            "Please find the statement enclosed.",
+            "We have attached a password-protected statement.",
+            "Please find attached the statement.",
+            "Please find enclosed the monthly bank statement.",
+        ],
+    )
+    def test_accepts_ordinary_attachment_wordings(self, body: str):
+        html = f"<html><body><p>{body} The password is your date of birth.</p></body></html>"
+        assert parse_email("idfc", html).email_type == "idfc_account_statement"

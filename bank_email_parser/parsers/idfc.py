@@ -244,15 +244,98 @@ class IdfcNeftBeneficiaryCreditParser(BaseEmailParser):
         )
 
 
+class IdfcCcReversalAlertParser(BaseEmailParser):
+    """IDFC FIRST Bank credit card transaction reversal.
+
+    Matches:
+      'Transaction of SGD 99.99 done at SAMPLE MERCHANT on 15 JAN 2026 has
+       been reversed to your IDFC FIRST Bank Credit Card ending XX1234.'
+
+    A reversal returns money to the card, so ``direction`` is ``credit``.
+
+    The body states the amount in the currency of the original purchase.
+    A foreign purchase thus carries no INR value anywhere in the email. The
+    parser keeps the currency that the bank writes, as the OneCard foreign
+    charge parser does. The consumer must not read the amount as INR. The
+    card statement carries the INR value that the bank bills.
+
+    ``ledger_role`` stays ``primary``. A reversal is its own credit, not a
+    completion of the purchase debit. The two rows net in the ledger.
+    """
+
+    bank = "idfc"
+    email_type = "idfc_cc_reversal_alert"
+
+    _pattern = re.compile(
+        r"Transaction\s+of\s+(?P<currency>[A-Z]{3}|INR|Rs\.?|₹)\s*"
+        r"(?P<amount>[\d,]+(?:\.\d+)?)\s+done\s+at\s+(?P<merchant>.+?)\s+"
+        r"on\s+(?P<date>\d{1,2}\s+[A-Za-z]{3,}\s+\d{4})\s+"
+        r"has\s+been\s+reversed\s+to\s+your\s+"
+        r"IDFC\s+FIRST\s+Bank\s+Credit\s+Card\s+ending\s+(?P<card>\S+?)\.",
+        re.IGNORECASE,
+    )
+
+    def parse(self, html: str) -> ParsedEmail:
+        _, text = self.prepare_html(html)
+
+        if not (match := self._pattern.search(text)):
+            raise ParseError("Could not parse IDFC CC reversal alert.")
+
+        if (amount := parse_amount(match.group("amount"))) is None:
+            raise ParseError(f"Could not parse amount: {match.group('amount')!r}")
+
+        raw_currency = match.group("currency").upper()
+        currency = "INR" if raw_currency in {"RS", "RS.", "₹"} else raw_currency
+
+        txn_dt = parse_datetime(match.group("date"))
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="credit",
+                amount=Money(amount=amount, currency=currency),
+                transaction_date=txn_dt.date() if txn_dt else None,
+                counterparty=match.group("merchant").strip(),
+                card_mask=match.group("card"),
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+
 class IdfcStatementEmailParser(BaseEmailParser):
     """IDFC account statement email."""
 
     bank = "idfc"
     email_type = "idfc_account_statement"
 
+    # "statement" and "password" both occur in ordinary alerts (a reversal
+    # names a "bank statement"). Require the statement to be the subject.
+    _anchor = re.compile(
+        r"(?:account\s+statement|statement\s+of\s+account|"
+        r"statement\s+is\s+attached|"
+        # Either order, with words in between: "attached the monthly bank
+        # statement" and "the statement attached". Hyphens included, for
+        # "a password-protected statement".
+        r"(?:attached|enclosed)(?:\s+[\w-]+){0,4}\s+statement|"
+        r"statement(?:\s+[\w-]+){0,3}\s+(?:attached|enclosed)|"
+        r"statement\s+at\s+a\s+glance|statement\s+date|"
+        r"e-?statement|"
+        r"statement\s+is\s+(?:enclosed|ready|available|generated)|"
+        r"statement\s+for\s+the\s+(?:month|period)|"
+        r"statement\s+has\s+been\s+generated|"
+        r"statement\s+for\s+your\s+account|"
+        # The boilerplate always names a "bank statement", so the longer
+        # form must not run over "bank".
+        r"your\s+statement\b|"
+        r"your(?:\s+(?!bank\b)\w+){1,4}\s+statement\s+(?:for|is|at)\b)",
+        re.IGNORECASE,
+    )
+
     def parse(self, html: str) -> ParsedEmail:
         _, text = self.prepare_html(html)
-        if "statement" not in text.lower() or "password" not in text.lower():
+        if not self._anchor.search(text) or "password" not in text.lower():
             raise ParseError("Not an IDFC statement email")
         return ParsedEmail(
             email_type=self.email_type,
@@ -269,6 +352,9 @@ _PARSERS = (
     # has received ... via NEFT UTR ..." anchor; cannot collide with the
     # account or CC shapes.
     IdfcNeftBeneficiaryCreditParser(),
+    # Before the statement stub: a reversal body names a "bank statement"
+    # and a "Password", which the stub's anchor once accepted.
+    IdfcCcReversalAlertParser(),
     IdfcStatementEmailParser(),
 )
 
