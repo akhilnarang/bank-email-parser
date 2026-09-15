@@ -27,7 +27,7 @@ class ParserContext:
 _thread_local = threading.local()
 
 
-_DECLARED_FACTS = frozenset(
+_CHECKED_ATTRS = frozenset(
     {"bank", "email_type", "event_time_source", "identifies_by", "counterparty_source"}
 )
 
@@ -63,8 +63,8 @@ class BaseEmailParser(ABC):
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
-        # Abstract intermediates set none of these and need no check.
-        if not (cls.__dict__.keys() & _DECLARED_FACTS):
+        # An abstract intermediate sets none of them.
+        if not (cls.__dict__.keys() & _CHECKED_ATTRS):
             return
         # A class can inherit bank or email_type from a parent. Both values
         # must still resolve to a string.
