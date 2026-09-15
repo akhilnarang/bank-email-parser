@@ -4,7 +4,7 @@ from datetime import date, time
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Money(BaseModel):
@@ -90,5 +90,34 @@ class ParsedEmail(BaseModel):
     statement: StatementSummary | None = None
     password_hint: str | None = None
 
+    ledger_role: Literal["primary", "provisional", "restatement", "completion"] = (
+        "primary"
+    )
+    """This email's relation to the money event, not a policy for it.
+
+    - ``primary``: the message that carries the event into the ledger
+      (default; almost every alert).
+    - ``provisional``: a pre-announcement whose ledger event is a *later*
+      message.
+    - ``restatement``: a redundant confirmation of an *earlier* message that
+      already carried the event.
+    - ``completion``: a *later* message that supplies a field the primary
+      message lacked, usually a reference, for the same event an *earlier*
+      message already recorded. The consumer completes the earlier row and
+      records no row of its own.
+
+    Meaningful only when ``transaction`` is set. It does NOT encode "not a
+    transaction" (that is ``transaction is None``). Mirrors
+    ``bank_sms_parser.models.ParsedSms.ledger_role``.
+    """
+
     event_time_source: Literal["body", "message_arrival"] = "body"
     identifies_by: Literal["counterparty", "card_mask", "none"] = "counterparty"
+
+    @model_validator(mode="after")
+    def _role_requires_transaction(self) -> ParsedEmail:
+        if self.ledger_role != "primary" and self.transaction is None:
+            raise ValueError(
+                f"ledger_role={self.ledger_role!r} is meaningless without a transaction"
+            )
+        return self
