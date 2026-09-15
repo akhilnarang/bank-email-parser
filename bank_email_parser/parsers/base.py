@@ -27,8 +27,8 @@ class ParserContext:
 _thread_local = threading.local()
 
 
-# All five, not just bank and email_type: a subclass can inherit those and
-# still set a wrong literal.
+# Drop a literal from this set and a subclass that sets only that literal,
+# such as `identifies_by = "wrong"`, skips the check below.
 _DECLARED_FACTS = frozenset(
     {"bank", "email_type", "event_time_source", "identifies_by", "counterparty_source"}
 )
