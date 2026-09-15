@@ -3239,3 +3239,27 @@ class TestIdfcStatementAttachmentWordings:
     def test_accepts_ordinary_attachment_wordings(self, body: str):
         html = f"<html><body><p>{body} The password is your date of birth.</p></body></html>"
         assert parse_email("idfc", html).email_type == "idfc_account_statement"
+
+
+class TestCounterpartySource:
+    """A parser states where the counterparty name came from."""
+
+    NEFT = (
+        "<html><body><p>Rs. 99,999.99 has been deducted from your HDFC Bank "
+        "account ending in XX0000 for a transfer to payee Sample Payee via "
+        "NEFT using HDFC Bank Online Banking.</p></body></html>"
+    )
+
+    def test_hdfc_transfer_reports_a_user_alias(self):
+        """HDFC prints the payee label the user saved, not the account holder."""
+        assert parse_email("hdfc", self.NEFT).counterparty_source == "user_alias"
+
+    def test_a_bank_stated_name_is_not_an_alias(self):
+        """ICICI states the beneficiary, so the name stays authoritative."""
+        html = (
+            "<html><body><p>Dear Customer, You have made an online ICICI fund "
+            "transfer payment of Rs. 100.00 towards Sample Person from your "
+            "ICICI Bank Savings Account XXXX0000 on Aug 28, 2026 at 04:30 p.m.. "
+            "The Transaction ID is ABC123.</p></body></html>"
+        )
+        assert parse_email("icici", html).counterparty_source == "bank"

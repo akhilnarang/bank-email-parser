@@ -296,7 +296,9 @@ class KotakCcBillPaidParser(BaseEmailParser):
         # With ``card_mask`` and ``account_mask`` both empty, the linker
         # falls through to its bank-only path and lands the txn on the
         # user's Kotak account (the source).
-        raw_description_parts = [f"CC bill paid: {amount} to {counterparty or 'unknown'}"]
+        raw_description_parts = [
+            f"CC bill paid: {amount} to {counterparty or 'unknown'}"
+        ]
         if card_mask:
             raw_description_parts.append(f"({card_mask})")
         raw_description = " ".join(raw_description_parts)

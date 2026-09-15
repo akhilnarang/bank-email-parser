@@ -114,6 +114,18 @@ class ParsedEmail(BaseModel):
     event_time_source: Literal["body", "message_arrival"] = "body"
     identifies_by: Literal["counterparty", "card_mask", "none"] = "counterparty"
 
+    counterparty_source: Literal["bank", "user_alias"] = "bank"
+    """Where ``transaction.counterparty`` comes from, not a policy for it.
+
+    - ``bank``: the bank states the name or the merchant (default).
+    - ``user_alias``: a label the user chose, such as the payee nickname
+      that HDFC prints for a savings-account transfer. The bank does not
+      state the account holder in such a message.
+
+    A consumer decides what to do with ``user_alias``. It must not let such
+    a name replace one that a bank stated. The parser only states the fact.
+    """
+
     @model_validator(mode="after")
     def _role_requires_transaction(self) -> ParsedEmail:
         if self.ledger_role != "primary" and self.transaction is None:
