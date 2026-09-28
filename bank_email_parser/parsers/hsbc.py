@@ -119,6 +119,8 @@ class HsbcCcTransactionAlertParser(BaseEmailParser):
 
     The older alert names the card as 'ending with 1234' and carries a time.
     This one masks the card as 'xx1234', dates it DD/MM/YY, and has no time.
+    A foreign purchase states the amount in the purchase currency
+    ('EUR 100.00'). The parser keeps that currency.
     """
 
     bank = "hsbc"
@@ -127,7 +129,7 @@ class HsbcCcTransactionAlertParser(BaseEmailParser):
     _pattern = re.compile(
         r"your\s+HSBC\s+Credit\s+Card\s+[xX]+(?P<card>\d{4})\s+"
         r"was\s+used\s+for\s+a\s+transaction\s+of\s+"
-        r"(?:INR|₹)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
+        r"(?P<currency>INR|₹|(?-i:[A-Z]{3}))\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
         r"at\s+(?P<merchant>.+?)\s+"
         # The period closes the sentence. Without it a merchant name holding a
         # date ("CAFE ON 01/02/26 ROAD") would end the match at the wrong date.
@@ -147,12 +149,15 @@ class HsbcCcTransactionAlertParser(BaseEmailParser):
         if (txn_date := parse_date(match.group("date"))) is None:
             raise ParseError(f"Could not parse date: {match.group('date')!r}")
 
+        raw_currency = match.group("currency").upper()
+        currency = "INR" if raw_currency == "₹" else raw_currency
+
         return ParsedEmail(
             email_type=self.email_type,
             bank=self.bank,
             transaction=TransactionAlert(
                 direction="debit",
-                amount=Money(amount=amount),
+                amount=Money(amount=amount, currency=currency),
                 transaction_date=txn_date,
                 counterparty=match.group("merchant").strip(),
                 card_mask=match.group("card"),

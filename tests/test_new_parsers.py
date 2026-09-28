@@ -309,6 +309,33 @@ class TestKotakCardTransactionOnVariant:
         assert result.transaction.transaction_time.isoformat() == "22:36:25"
 
 
+class TestIdfcCcDebitAlertParser:
+    SAMPLE_HTML = """
+    <html><body>
+      <p>Dear Cardmember,</p>
+      <p>Transaction Successful! INR 100.00 spent on your IDFC FIRST BANK
+         Credit Card ending XX0000 at SAMPLE MERCHANT on 01 SEP 2026.
+         Available Limit: INR 99999.99 .</p>
+    </body></html>
+    """
+
+    @pytest.mark.parametrize("currency", ["INR", "SGD"])
+    def test_parses_the_purchase_in_its_currency(self, currency):
+        html = self.SAMPLE_HTML.replace("INR 100.00", f"{currency} 100.00")
+
+        result = parse_email("idfc", html)
+
+        assert result.email_type == "idfc_cc_debit_alert"
+        txn = result.transaction
+        assert txn is not None
+        assert txn.direction == "debit"
+        assert txn.amount.amount == Decimal("100.00")
+        assert txn.amount.currency == currency
+        assert txn.counterparty == "SAMPLE MERCHANT"
+        assert txn.balance is not None
+        assert txn.balance.amount == Decimal("99999.99")
+
+
 class TestIdfcCcCreditAlertParser:
     """Test IDFC FIRST credit card payment received alerts."""
 

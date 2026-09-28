@@ -87,13 +87,16 @@ class IdfcCcDebitAlertParser(BaseEmailParser):
     Matches:
       'INR 100.00 spent on your IDFC FIRST BANK Credit Card ending XX1234
        at SAMPLE MERCHANT on 15 JAN 2026.'
+
+    A foreign purchase states the amount in the purchase currency
+    ('SGD 100.00'). The parser keeps that currency.
     """
 
     bank = "idfc"
     email_type = "idfc_cc_debit_alert"
 
     _pattern = re.compile(
-        r"INR\s*(?P<amount>[\d,.]+)\s+"
+        r"(?P<currency>[A-Z]{3})\s*(?P<amount>[\d,.]+)\s+"
         r"spent on your IDFC FIRST BANK Credit Card ending (?P<card>\S+) "
         r"at (?P<merchant>.+?) on (?P<date>\d{1,2}\s+[A-Z]{3}\s+\d{4})",
     )
@@ -125,7 +128,7 @@ class IdfcCcDebitAlertParser(BaseEmailParser):
             bank=self.bank,
             transaction=TransactionAlert(
                 direction="debit",
-                amount=Money(amount=amount),
+                amount=Money(amount=amount, currency=match.group("currency")),
                 transaction_date=txn_dt.date() if txn_dt else None,
                 counterparty=match.group("merchant").strip(),
                 card_mask=match.group("card"),  # no time in CC debit alerts

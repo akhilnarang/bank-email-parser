@@ -165,6 +165,22 @@ class TestHsbcCcTransactionAlert:
         assert txn.transaction_date == date(2026, 8, 26)
         assert txn.channel == "card"
 
+    def test_a_foreign_purchase_keeps_its_currency(self):
+        html = self.SAMPLE_HTML.replace("INR 978.00", "EUR 100.00")
+
+        txn = parse_email("hsbc", html).transaction
+
+        assert txn is not None
+        assert txn.amount.amount == Decimal("100.00")
+        assert txn.amount.currency == "EUR"
+        assert txn.counterparty == "SAMPLE MERCHANT NAME"
+
+    def test_a_lowercase_word_is_not_a_currency(self):
+        html = self.SAMPLE_HTML.replace("INR 978.00", "the 978.00")
+
+        with pytest.raises(ParseError):
+            parse_email("hsbc", html)
+
     def test_the_date_is_day_first(self):
         """01/02/26 is 1 February, not 2 January. The date is ambiguous on
         purpose: a month-first reading would still pass an unambiguous one."""
