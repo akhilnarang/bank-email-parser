@@ -55,6 +55,7 @@ class SliceTransactionAlertParser(BaseEmailParser):
     Matches:
       'You have received ₹X via UPI in your slice bank account/a/c XXXX'
       'You have sent ₹X via UPI from your slice bank account/a/c XXXX'
+      '₹X debited from your slice bank account XXXX via UPI.'
     """
 
     bank = "slice"
@@ -67,11 +68,19 @@ class SliceTransactionAlertParser(BaseEmailParser):
         rf"(?:in|from)\s+your\s+slice\s+(?:bank|savings)\s+{_ACCT}"
         r"(?:[.!]\s*Avl\.\s*Bal\.\s*₹\s*(?P<balance>[\d,\u200c]+(?:\.\d+)?))?"
     )
+    _debited_pattern = re.compile(
+        rf"₹\s*(?P<amount>{_AMT})\s+(?P<direction>debited)\s+"
+        rf"from\s+your\s+slice\s+(?:bank|savings)\s+{_ACCT}\s+"
+        r"via\s+(?P<channel>[A-Za-z]+)"
+    )
 
     def parse(self, html: str) -> ParsedEmail:
         soup, text = self.prepare_html(html)
 
-        if not (match := self._body_pattern.search(text)):
+        if not (
+            match := self._body_pattern.search(text)
+            or self._debited_pattern.search(text)
+        ):
             raise ParseError("Could not parse slice transaction alert body.")
 
         direction = "credit" if match.group("direction") == "received" else "debit"
@@ -79,7 +88,7 @@ class SliceTransactionAlertParser(BaseEmailParser):
         channel = match.group("channel").strip().lower()
 
         balance = None
-        if bal_str := match.group("balance"):
+        if bal_str := match.groupdict().get("balance"):
             balance = Money(amount=_clean_amount(bal_str))
 
         table_data = extract_table_pairs(soup, expected_keys=_EXPECTED_TABLE_KEYS)

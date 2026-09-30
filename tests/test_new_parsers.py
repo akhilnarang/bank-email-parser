@@ -3313,3 +3313,30 @@ class TestBobCcTransactionAlert:
         assert result.transaction.balance is not None
         assert result.transaction.balance.amount == Decimal("99000.00")
         assert result.transaction.transaction_date == date(2026, 9, 30)
+
+
+class TestSliceDebitedAlert:
+    HTML = """
+    <html><body><table>
+      <tr><td>Hi Customer,</td></tr>
+      <tr><td> ₹100 debited from your slice bank account xx0000 via UPI. </td></tr>
+      <tr><td><table>
+        <tr><td>Transaction date</td><td>30-Sep-26</td></tr>
+        <tr><td>To</td><td>Sample Merchant</td></tr>
+        <tr><td>RRN</td><td>000000000000</td></tr>
+      </table></td></tr>
+    </table></body></html>
+    """
+
+    def test_parses_debit(self):
+        result = parse_email("slice", self.HTML)
+
+        assert result.email_type == "slice_transaction_alert"
+        assert result.transaction is not None
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("100")
+        assert result.transaction.account_mask == "xx0000"
+        assert result.transaction.channel == "upi"
+        assert result.transaction.counterparty == "Sample Merchant"
+        assert result.transaction.reference_number == "000000000000"
+        assert result.transaction.transaction_date == date(2026, 9, 30)
