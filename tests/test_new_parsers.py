@@ -3290,3 +3290,26 @@ class TestCounterpartySource:
             "The Transaction ID is ABC123.</p></body></html>"
         )
         assert parse_email("icici", html).counterparty_source == "bank"
+
+
+class TestBobCcTransactionAlert:
+    SAMPLE_HTML = """
+    <html><body><div><p>Dear Customer,</p><p>Thank you for using your BOBCARD **0000 for a transaction of  INR 1,000.00  at samplestore on 30-09-2026.</p>
+    <p>Following this transaction, the available balance on your card is  Rs 99,000.00,
+    with a total outstanding of  Rs 0.00.</p><p>Team BOBCARD</p></div></body></html>
+    """
+
+    def test_parses_spend(self):
+        result = parse_email("bob", self.SAMPLE_HTML)
+
+        assert result.email_type == "bob_cc_transaction_alert"
+        assert result.bank == "bob"
+        assert result.transaction is not None
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("1000.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.card_mask == "0000"
+        assert result.transaction.counterparty == "samplestore"
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("99000.00")
+        assert result.transaction.transaction_date == date(2026, 9, 30)
