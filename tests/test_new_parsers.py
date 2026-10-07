@@ -3340,3 +3340,61 @@ class TestSliceDebitedAlert:
         assert result.transaction.counterparty == "Sample Merchant"
         assert result.transaction.reference_number == "000000000000"
         assert result.transaction.transaction_date == date(2026, 9, 30)
+
+
+class TestRevolutPocketTopup:
+    HTML = """
+    <html><body><table>
+      <tr><td><h1>Money has been added to your Pocket</h1></td></tr>
+      <tr><td>Hi Sample Customer,</td></tr>
+      <tr><td>We're happy to let you know that your Pocket has been credited
+        successfully. You can find details of your top-up below:</td></tr>
+      <tr><td><p>Transaction date:</p><p>12 March 2026 7:05 PM IST</p></td></tr>
+      <tr><td><span>Amount credited</span>:<p>&#8377;1,250.50</p></td></tr>
+      <tr><td>Your current Pocket balance is &#8377;2,000.75.</td></tr>
+      <tr><td>Revolut Payments India Private Limited</td></tr>
+    </table></body></html>
+    """
+
+    def test_parses_topup_as_credit_with_balance(self):
+        result = parse_email("revolut", self.HTML)
+
+        assert result.email_type == "revolut_pocket_topup"
+        assert result.bank == "revolut"
+        assert result.transaction is not None
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("1250.50")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.transaction_date == date(2026, 3, 12)
+        assert result.transaction.transaction_time == time(19, 5)
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("2000.75")
+        assert result.transaction.counterparty == "Self"
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ("Your current Pocket balance is &#8377;2,000.75.", ""),
+            ("&#8377;1,250.50", "&#8377;1,250<span>.50</span>"),
+        ],
+        ids=["no-balance", "split-amount"],
+    )
+    def test_rejects_topup_without_a_whole_field(self, old, new):
+        with pytest.raises(ParseError):
+            parse_email("revolut", self.HTML.replace(old, new))
+
+    def test_rejects_other_revolut_email(self):
+        html = """
+        <html><body><table>
+          <tr><td>Money has been added to your Pocket</td></tr>
+          <tr><td>Hi Sample Customer, your Pocket has been credited
+            successfully. Sample Friend sent you money.</td></tr>
+          <tr><td>Transaction date: 12 March 2026 7:05 PM IST</td></tr>
+          <tr><td>Amount credited: &#8377;300</td></tr>
+          <tr><td>Your current Pocket balance is &#8377;900.</td></tr>
+          <tr><td>Revolut Payments India Private Limited</td></tr>
+        </table></body></html>
+        """
+
+        with pytest.raises(ParseError):
+            parse_email("revolut", html)
