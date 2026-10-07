@@ -6,11 +6,11 @@ Supported email types:
 """
 
 import re
+from decimal import Decimal
 
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
 from bank_email_parser.parsers.base import BankParser, BaseEmailParser
-from bank_email_parser.parsing.amounts import parse_amount
 from bank_email_parser.parsing.dates import parse_datetime
 
 # Inline markup can split one number into parts, such as "₹500 .50". Refuse a
@@ -22,7 +22,7 @@ class RevolutPocketTopupParser(BaseEmailParser):
     """Revolut Pocket top-up confirmation.
 
     Matches the 'Your Pocket has been credited successfully' email body:
-      'Transaction date: 4 September 2026 9:15 AM IST'
+      'Transaction date: 18 January 2026 6:40 PM IST'
       'Amount credited: ₹500'
       'Your current Pocket balance is ₹750.'
 
@@ -51,16 +51,14 @@ class RevolutPocketTopupParser(BaseEmailParser):
         """Parse a Pocket top-up email into a credit transaction."""
         _, text = self.prepare_html(html)
         lowered = text.lower()
-        if "revolut" not in lowered or (
-            "pocket has been credited" not in lowered
-            and "money has been added to your pocket" not in lowered
-        ):
+        # Only a top-up gives "details of your top-up". A credit from another
+        # person must not match, or the consumer marks it as a self-transfer.
+        if "revolut" not in lowered or "details of your top-up" not in lowered:
             raise ParseError("Not a Revolut Pocket top-up email.")
 
         if not (amount_match := self._amount_re.search(text)):
             raise ParseError("Could not find the Revolut top-up amount.")
-        if (amount := parse_amount(amount_match.group("amount"))) is None:
-            raise ParseError("Could not parse the Revolut top-up amount.")
+        amount = Decimal(amount_match["amount"].replace(",", ""))
 
         if not (date_match := self._date_re.search(text)):
             raise ParseError("Could not find the Revolut top-up date.")
@@ -71,8 +69,7 @@ class RevolutPocketTopupParser(BaseEmailParser):
         # amount apart, so a top-up without it is not parsed.
         if not (balance_match := self._balance_re.search(text)):
             raise ParseError("Could not find the Revolut Pocket balance.")
-        if (balance := parse_amount(balance_match.group("balance"))) is None:
-            raise ParseError("Could not parse the Revolut Pocket balance.")
+        balance = Decimal(balance_match["balance"].replace(",", ""))
 
         return ParsedEmail(
             email_type=self.email_type,

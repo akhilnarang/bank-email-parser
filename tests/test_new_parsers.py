@@ -3386,9 +3386,15 @@ class TestRevolutPocketTopup:
 
     def test_rejects_other_revolut_email(self):
         html = """
-        <html><body><p>Hi Sample Customer, add money to your Pocket today.
-        Amount credited: &#8377;10. Revolut Payments India Private Limited</p>
-        </body></html>
+        <html><body><table>
+          <tr><td>Money has been added to your Pocket</td></tr>
+          <tr><td>Hi Sample Customer, your Pocket has been credited
+            successfully. Sample Friend sent you money.</td></tr>
+          <tr><td>Transaction date: 12 March 2026 7:05 PM IST</td></tr>
+          <tr><td>Amount credited: &#8377;300</td></tr>
+          <tr><td>Your current Pocket balance is &#8377;900.</td></tr>
+          <tr><td>Revolut Payments India Private Limited</td></tr>
+        </table></body></html>
         """
 
         with pytest.raises(ParseError):
