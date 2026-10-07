@@ -3350,7 +3350,7 @@ class TestRevolutPocketTopup:
       <tr><td>We're happy to let you know that your Pocket has been credited
         successfully. You can find details of your top-up below:</td></tr>
       <tr><td><p>Transaction date:</p><p>12 March 2026 7:05 PM IST</p></td></tr>
-      <tr><td><p>Amount credited:</p><p>&#8377;1,250.50</p></td></tr>
+      <tr><td><span>Amount credited</span>:<p>&#8377;1,250.50</p></td></tr>
       <tr><td>Your current Pocket balance is &#8377;2,000.75.</td></tr>
       <tr><td>Revolut Payments India Private Limited</td></tr>
     </table></body></html>
@@ -3371,6 +3371,18 @@ class TestRevolutPocketTopup:
         assert result.transaction.balance.amount == Decimal("2000.75")
         assert result.transaction.counterparty is None
         assert result.transaction.reference_number is None
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ("Your current Pocket balance is &#8377;2,000.75.", ""),
+            ("&#8377;1,250.50", "&#8377;1,250<span>.50</span>"),
+        ],
+        ids=["no-balance", "split-amount"],
+    )
+    def test_rejects_topup_without_a_whole_field(self, old, new):
+        with pytest.raises(ParseError):
+            parse_email("revolut", self.HTML.replace(old, new))
 
     def test_rejects_other_revolut_email(self):
         html = """

@@ -13,7 +13,9 @@ from bank_email_parser.parsers.base import BankParser, BaseEmailParser
 from bank_email_parser.parsing.amounts import parse_amount
 from bank_email_parser.parsing.dates import parse_datetime
 
-_AMT = r"(?:₹|INR|Rs\.?)\s*(?P<{name}>[\d,]+(?:\.\d+)?)"
+# Inline markup can split one number into parts, such as "₹500 .50". Refuse a
+# number that more digits follow, so that a part is never read as the whole.
+_AMT = r"(?:₹|INR|Rs\.?)\s*(?P<{name}>\d[\d,]*(?:\.\d+)?)(?!\s*[.,]?\s*\d)"
 
 
 class RevolutPocketTopupParser(BaseEmailParser):
@@ -32,13 +34,13 @@ class RevolutPocketTopupParser(BaseEmailParser):
     email_type = "revolut_pocket_topup"
 
     _date_re = re.compile(
-        r"Transaction\s+date:?\s*"
+        r"Transaction\s+date\s*:?\s*"
         r"(?P<when>\d{1,2}\s+[A-Za-z]+\s+\d{4},?\s+\d{1,2}:\d{2}\s*[AP]M)"
         r"(?:\s*IST)?",
         re.IGNORECASE,
     )
     _amount_re = re.compile(
-        r"Amount\s+credited:?\s*" + _AMT.format(name="amount"), re.IGNORECASE
+        r"Amount\s+credited\s*:?\s*" + _AMT.format(name="amount"), re.IGNORECASE
     )
     _balance_re = re.compile(
         r"current\s+Pocket\s+balance\s+is\s*" + _AMT.format(name="balance"),
@@ -65,11 +67,12 @@ class RevolutPocketTopupParser(BaseEmailParser):
         if (when := parse_datetime(date_match.group("when"))) is None:
             raise ParseError("Could not parse the Revolut top-up date.")
 
-        balance = None
-        if (balance_match := self._balance_re.search(text)) and (
-            balance_amount := parse_amount(balance_match.group("balance"))
-        ) is not None:
-            balance = Money(amount=balance_amount, currency="INR")
+        # The balance is the only field that tells two top-ups of the same
+        # amount apart, so a top-up without it is not parsed.
+        if not (balance_match := self._balance_re.search(text)):
+            raise ParseError("Could not find the Revolut Pocket balance.")
+        if (balance := parse_amount(balance_match.group("balance"))) is None:
+            raise ParseError("Could not parse the Revolut Pocket balance.")
 
         return ParsedEmail(
             email_type=self.email_type,
@@ -79,7 +82,7 @@ class RevolutPocketTopupParser(BaseEmailParser):
                 amount=Money(amount=amount, currency="INR"),
                 transaction_date=when.date(),
                 transaction_time=when.time(),
-                balance=balance,
+                balance=Money(amount=balance, currency="INR"),
                 raw_description=amount_match.group(0),
             ),
         )
