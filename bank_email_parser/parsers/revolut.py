@@ -26,8 +26,9 @@ class RevolutPocketTopupParser(BaseEmailParser):
       'Amount credited: ₹500'
       'Your current Pocket balance is ₹750.'
 
-    The email names no payer and gives no reference. The post-top-up balance
-    tells two top-ups of the same amount apart.
+    The email names no payer and gives no reference. A top-up always moves
+    the user's own money, so the counterparty is "Self". The post-top-up
+    balance tells two top-ups of the same amount apart.
     """
 
     bank = "revolut"
@@ -79,6 +80,7 @@ class RevolutPocketTopupParser(BaseEmailParser):
                 amount=Money(amount=amount, currency="INR"),
                 transaction_date=when.date(),
                 transaction_time=when.time(),
+                counterparty="Self",
                 balance=Money(amount=balance, currency="INR"),
                 raw_description=amount_match.group(0),
             ),
