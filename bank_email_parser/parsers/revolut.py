@@ -15,7 +15,7 @@ from bank_email_parser.parsing.dates import parse_datetime
 
 # Inline markup can split one number into parts, such as "₹500 .50". Refuse a
 # number that more digits follow, so that a part is never read as the whole.
-_AMT = r"(?:₹|INR|Rs\.?)\s*(?P<{name}>\d[\d,]*(?:\.\d+)?)(?!\s*[.,]?\s*\d)"
+_AMT = r"₹\s*(?P<{name}>\d[\d,]*(?:\.\d+)?)(?!\s*[.,]?\s*\d)"
 
 
 class RevolutPocketTopupParser(BaseEmailParser):
@@ -36,8 +36,7 @@ class RevolutPocketTopupParser(BaseEmailParser):
 
     _date_re = re.compile(
         r"Transaction\s+date\s*:?\s*"
-        r"(?P<when>\d{1,2}\s+[A-Za-z]+\s+\d{4},?\s+\d{1,2}:\d{2}\s*[AP]M)"
-        r"(?:\s*IST)?",
+        r"(?P<when>\d{1,2}\s+[A-Za-z]+\s+\d{4}\s+\d{1,2}:\d{2}\s*[AP]M)",
         re.IGNORECASE,
     )
     _amount_re = re.compile(

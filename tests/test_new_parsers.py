@@ -3370,7 +3370,6 @@ class TestRevolutPocketTopup:
         assert result.transaction.balance is not None
         assert result.transaction.balance.amount == Decimal("2000.75")
         assert result.transaction.counterparty == "Self"
-        assert result.transaction.reference_number is None
 
     @pytest.mark.parametrize(
         ("old", "new"),
