@@ -12,6 +12,7 @@ from bank_email_parser.parsers.indusind import IndusindParser
 from bank_email_parser.parsers.jupiter import JupiterParser
 from bank_email_parser.parsers.kotak import KotakParser
 from bank_email_parser.parsers.onecard import OnecardParser
+from bank_email_parser.parsers.revolut import RevolutParser
 from bank_email_parser.parsers.sbi import SbiParser
 from bank_email_parser.parsers.slice import SliceParser
 from bank_email_parser.parsers.uboi import UboiParser
@@ -30,6 +31,7 @@ PARSERS = {
     "jupiter": JupiterParser,
     "kotak": KotakParser,
     "onecard": OnecardParser,
+    "revolut": RevolutParser,
     "sbi": SbiParser,
     "slice": SliceParser,
     "uboi": UboiParser,
