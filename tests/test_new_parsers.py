@@ -1978,6 +1978,58 @@ class TestYesbankCcDebitAlertParser:
         assert result.transaction.balance.amount == Decimal("332890.87")
 
 
+class TestYesbankAccountCreditAlertParser:
+    """Test YES BANK account credit alert parser with synthetic HTML."""
+
+    SAMPLE_HTML = """
+    <html><body>
+    <p>Dear Customer,</p>
+    <p>An amount of INR 4,321.00 has been credited to your A/C. No. XX9999
+    on 15-JAN-2026 09:15:45 on account of CHQ DEP TESTBANK 14-JAN-26
+    TEST BRANCH JANE DOE.</p>
+    <p>Available Balance on 15-JAN-26 is INR 8,765.43 and Total available
+    balance (including linked deposits and Limit) is INR 8,765.43.</p>
+    <p>This service is a part of our constant endeavor to deliver Superior
+    Customer Service Experience to our valued customers. This is a system
+    generated message. Please do not reply to this e-mail.</p>
+    </body></html>
+    """
+
+    def test_parses_cheque_deposit_credit(self):
+        result = parse_email("yesbank", self.SAMPLE_HTML)
+        assert result.transaction is not None
+        assert result.email_type == "yesbank_account_credit_alert"
+        assert result.bank == "yesbank"
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("4321.00")
+        assert result.transaction.amount.currency == "INR"
+        assert result.transaction.account_mask == "XX9999"
+        assert (
+            result.transaction.counterparty
+            == "CHQ DEP TESTBANK 14-JAN-26 TEST BRANCH JANE DOE"
+        )
+        assert result.transaction.channel == "cheque"
+        assert result.transaction.reference_number is None
+        assert result.transaction.transaction_date == date(2026, 1, 15)
+        assert result.transaction.transaction_time == time(9, 15, 45)
+        assert result.transaction.balance is not None
+        assert result.transaction.balance.amount == Decimal("8765.43")
+
+    def test_non_cheque_credit_has_no_channel(self):
+        html = """
+        <html><body>
+        <p>An amount of INR 1,000.00 has been credited to your A/C. No. XX9999
+        on 15-JAN-2026 09:15:45 on account of SAMPLE CREDIT REF.</p>
+        </body></html>
+        """
+        result = parse_email("yesbank", html)
+        assert result.transaction is not None
+        assert result.email_type == "yesbank_account_credit_alert"
+        assert result.transaction.counterparty == "SAMPLE CREDIT REF"
+        assert result.transaction.channel is None
+        assert result.transaction.balance is None
+
+
 class TestIciciCcUpiPaymentAlertParser:
     """Test ICICI CC UPI payment alert parser with synthetic HTML."""
 
