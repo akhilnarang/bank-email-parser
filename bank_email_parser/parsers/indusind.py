@@ -166,12 +166,14 @@ class IndusindDcTransactionAlertParser(BaseEmailParser):
         re.IGNORECASE,
     )
 
-    _FIELD_PREFIXES = {
-        "merchant name": "merchant",
-        "amount": "amount",
-        "date": "date",
-        "time": "time",
-    }
+    _FIELD_PREFIXES = frozendict(
+        {
+            "merchant name": "merchant",
+            "amount": "amount",
+            "date": "date",
+            "time": "time",
+        }
+    )
 
     def _extract_fields(self, soup: BeautifulSoup) -> dict[str, str]:
         """Extract table fields using prefix matching on normalized keys.

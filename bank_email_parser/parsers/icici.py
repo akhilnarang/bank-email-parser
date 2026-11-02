@@ -35,10 +35,9 @@ def _resolve_currency(raw: str) -> str:
 # Shared currency pattern: any 3-letter uppercase code, or Rs./₹
 _CUR = r"(?P<currency>[A-Z]{3}|Rs\.?|₹)"
 
-_DIRECTION_BY_VERB: dict[str, Literal["credit", "debit"]] = {
-    "credited": "credit",
-    "debited": "debit",
-}
+_DIRECTION_BY_VERB: frozendict[str, Literal["credit", "debit"]] = frozendict(
+    {"credited": "credit", "debited": "debit"}
+)
 
 # ICICI netbanking alerts append "hours" to 24h times ('23:02 hours'); dateutil
 # doesn't understand that suffix, so strip it before parsing.

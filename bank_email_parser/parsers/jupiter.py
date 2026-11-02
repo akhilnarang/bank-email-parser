@@ -32,13 +32,15 @@ class JupiterUpiDebitAlertParser(BaseEmailParser):
     bank = "jupiter"
     email_type = "jupiter_upi_debit_alert"
 
-    _EXPECTED_KEYS = {
-        "you paid",
-        "paid to",
-        "date",
-        "transaction id",
-        "bank reference number",
-    }
+    _EXPECTED_KEYS = frozenset(
+        {
+            "you paid",
+            "paid to",
+            "date",
+            "transaction id",
+            "bank reference number",
+        }
+    )
 
     @staticmethod
     def _extract_paid_to(value_cell) -> tuple[str | None, str | None]:

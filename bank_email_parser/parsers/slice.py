@@ -26,19 +26,21 @@ _AMT = r"[\d,\u200c]+(?:\.\d+)?"
 _ACCT = r"(?:a/c|account(?:\s+ending)?)\s+(?P<account>[\w\-*]+)"
 
 # All table keys we care about across Slice email types
-_EXPECTED_TABLE_KEYS = {
-    "transaction date",
-    "date",
-    "from",
-    "to",
-    "sender name",
-    "beneficiary name",
-    "beneficiary acc no",
-    "beneficiary bank",
-    "rrn",
-    "imps ref no",
-    "rtgs ref no",
-}
+_EXPECTED_TABLE_KEYS = frozenset(
+    {
+        "transaction date",
+        "date",
+        "from",
+        "to",
+        "sender name",
+        "beneficiary name",
+        "beneficiary acc no",
+        "beneficiary bank",
+        "rrn",
+        "imps ref no",
+        "rtgs ref no",
+    }
+)
 
 
 def _clean_amount(raw: str) -> Decimal:

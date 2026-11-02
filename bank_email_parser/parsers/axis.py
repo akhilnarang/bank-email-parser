@@ -50,16 +50,18 @@ _KEY_CLEANUP = re.compile(r"[\s:.*]+$")
 _STYLE_WHITESPACE = re.compile(r"\s+")
 
 # Map normalized label text to internal field names
-_FIELD_MAP = {
-    "transaction amount": "amount",
-    "merchant name": "merchant",
-    "axis bank credit card no": "card_mask",
-    "date & time": "date_time",
-    "date &amp; time": "date_time",
-    "available limit": "balance",
-    "total credit limit": "total_limit",
-    "transaction status": "status",
-}
+_FIELD_MAP = frozendict(
+    {
+        "transaction amount": "amount",
+        "merchant name": "merchant",
+        "axis bank credit card no": "card_mask",
+        "date & time": "date_time",
+        "date &amp; time": "date_time",
+        "available limit": "balance",
+        "total credit limit": "total_limit",
+        "transaction status": "status",
+    }
+)
 
 # The only transaction status observed so far. Any other value is treated as
 # unrecognized and fails loudly rather than defaulting to a direction: an

@@ -73,7 +73,7 @@ def parse(html: str) -> ParsedEmail:
     return FooParser().parse(html)
 ```
 
-`_PARSERS` is the repo convention name; `parsers = _PARSERS` is the runtime contract that `BankParser.__init_subclass__` checks. The top-level dict in `parsers/__init__.py` is `PARSERS` (no underscore) and stores **dispatcher classes**, not parser instances.
+`_PARSERS` is the repo convention name; `parsers = _PARSERS` is the runtime contract that `BankParser.__init_subclass__` checks. The top-level `frozendict` in `parsers/__init__.py` is `PARSERS` (no underscore) and stores **dispatcher classes**, not parser instances.
 
 ## Implementation checklist
 

@@ -1,6 +1,7 @@
 """HTML text and simple table extraction helpers."""
 
 import re
+from collections.abc import Set
 
 from bs4 import BeautifulSoup
 
@@ -11,7 +12,7 @@ _WHITESPACE = re.compile(r"\s+")
 
 def extract_table_pairs(
     soup: BeautifulSoup,
-    expected_keys: set[str] | None = None,
+    expected_keys: Set[str] | None = None,
 ) -> dict[str, str]:
     """Extract key-value pairs from 2-column table rows in HTML."""
     data: dict[str, str] = {}
