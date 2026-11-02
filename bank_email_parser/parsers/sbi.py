@@ -283,14 +283,16 @@ class SbiDcTransactionAlertParser(BaseEmailParser):
 
     _ANCHOR = "using your sbi debit card"
 
-    _EXPECTED_KEYS = {
-        "terminal owner name",
-        "date time",
-        "transaction number",
-        "amount inr",
-        "last 4 digit of card",
-        "transaction type",
-    }
+    _EXPECTED_KEYS = frozenset(
+        {
+            "terminal owner name",
+            "date time",
+            "transaction number",
+            "amount inr",
+            "last 4 digit of card",
+            "transaction type",
+        }
+    )
 
     def parse(self, html: str) -> ParsedEmail:
         soup, text = self.prepare_html(html)

@@ -1,6 +1,7 @@
 """Explicit bank parser registry."""
 
 from bank_email_parser.parsers.axis import AxisParser
+from bank_email_parser.parsers.base import BankParser
 from bank_email_parser.parsers.bob import BobParser
 from bank_email_parser.parsers.bom import BomParser
 from bank_email_parser.parsers.equitas import EquitasParser
@@ -18,24 +19,26 @@ from bank_email_parser.parsers.slice import SliceParser
 from bank_email_parser.parsers.uboi import UboiParser
 from bank_email_parser.parsers.yesbank import YesbankParser
 
-PARSERS = {
-    "axis": AxisParser,
-    "bob": BobParser,
-    "bom": BomParser,
-    "equitas": EquitasParser,
-    "hdfc": HdfcParser,
-    "hsbc": HsbcParser,
-    "icici": IciciParser,
-    "idfc": IdfcParser,
-    "indusind": IndusindParser,
-    "jupiter": JupiterParser,
-    "kotak": KotakParser,
-    "onecard": OnecardParser,
-    "revolut": RevolutParser,
-    "sbi": SbiParser,
-    "slice": SliceParser,
-    "uboi": UboiParser,
-    "yesbank": YesbankParser,
-}
+PARSERS: frozendict[str, type[BankParser]] = frozendict(
+    {
+        "axis": AxisParser,
+        "bob": BobParser,
+        "bom": BomParser,
+        "equitas": EquitasParser,
+        "hdfc": HdfcParser,
+        "hsbc": HsbcParser,
+        "icici": IciciParser,
+        "idfc": IdfcParser,
+        "indusind": IndusindParser,
+        "jupiter": JupiterParser,
+        "kotak": KotakParser,
+        "onecard": OnecardParser,
+        "revolut": RevolutParser,
+        "sbi": SbiParser,
+        "slice": SliceParser,
+        "uboi": UboiParser,
+        "yesbank": YesbankParser,
+    }
+)
 
 __all__ = ["PARSERS"]
