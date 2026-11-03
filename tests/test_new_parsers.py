@@ -1,5 +1,6 @@
 """Tests for newly added parsers: Kotak811 Transaction, Kotak CC Bill Paid,
-ICICI CC Reversal, and Axis NEFT (stub)."""
+ICICI CC Reversal, Axis NEFT (stub), and YES BANK account debit and
+RTGS completion alerts."""
 
 from datetime import date, time
 from decimal import Decimal
@@ -2015,6 +2016,40 @@ class TestYesbankAccountCreditAlertParser:
         assert result.transaction.balance is not None
         assert result.transaction.balance.amount == Decimal("8765.43")
 
+        debit = parse_email("yesbank", self.RTGS_DEBIT_HTML)
+        assert debit.transaction is not None
+        assert debit.email_type == "yesbank_account_debit_alert"
+        assert debit.ledger_role == "primary"
+        assert debit.transaction.direction == "debit"
+        assert debit.transaction.amount.amount == Decimal("12345.00")
+        assert debit.transaction.account_mask == "XX0000"
+        assert debit.transaction.transaction_date == date(2026, 8, 21)
+        assert debit.transaction.transaction_time == time(10, 20, 30)
+        assert debit.transaction.channel == "rtgs"
+        assert debit.transaction.reference_number == "YESBR9999010100000000"
+        assert debit.transaction.counterparty == "JANE DOE"
+        assert debit.transaction.balance is not None
+        assert debit.transaction.balance.amount == Decimal("23456.78")
+
+        completed = parse_email("yesbank", self.RTGS_COMPLETED_HTML)
+        assert completed.transaction is not None
+        assert completed.email_type == "yesbank_account_rtgs_completed_alert"
+        assert completed.ledger_role == "completion"
+        assert completed.transaction.direction == "debit"
+        assert completed.transaction.account_mask is None
+        assert completed.transaction.counterparty is None
+        assert (
+            completed.transaction.amount,
+            completed.transaction.transaction_date,
+            completed.transaction.channel,
+            completed.transaction.reference_number,
+        ) == (
+            debit.transaction.amount,
+            debit.transaction.transaction_date,
+            debit.transaction.channel,
+            debit.transaction.reference_number,
+        )
+
     def test_non_cheque_credit_has_no_channel(self):
         html = """
         <html><body>
@@ -2028,6 +2063,38 @@ class TestYesbankAccountCreditAlertParser:
         assert result.transaction.counterparty == "SAMPLE CREDIT REF"
         assert result.transaction.channel is None
         assert result.transaction.balance is None
+
+        missing_ref_html = """
+        <html><body>
+        <p>RTGS Transaction with reference number for INR 12,345.00 has been
+        credited to the beneficiary account number XXXXXXX9999 on 21-08-2026
+        at 10:20:30.</p>
+        </body></html>
+        """
+        with pytest.raises(ParseError):
+            parse_email("yesbank", missing_ref_html)
+
+    RTGS_DEBIT_HTML = """
+    <html><body>
+    <p>An amount of INR 12,345.00 has been debited to your A/C. No. XX0000
+    on 21-AUG-2026 10:20:30 on account of RTGS:YESBR9999010100000000/Mr JANE DOE
+    Available Balance on 21-AUG-26 is INR 23,456.78 and Total available
+    balance (including linked deposits and Limit) is INR 23,456.78.</p>
+    <p>For any clarifications contact us at 18001200 (Toll Free).</p>
+    </body></html>
+    """
+
+    RTGS_COMPLETED_HTML = """
+    <html><body>
+    <p>Dear Sir/Madam,</p>
+    <p>Greetings from YES Bank.</p>
+    <p>RTGS Transaction with reference number YESBR9999010100000000 for
+    INR 12,345.00 has been credited to the beneficiary account number
+    XXXXXXX9999 on 21-08-2026 at 10:20:30.</p>
+    <p>With Regards,</p>
+    <p>YES BANK Ltd</p>
+    </body></html>
+    """
 
 
 class TestIciciCcUpiPaymentAlertParser:
