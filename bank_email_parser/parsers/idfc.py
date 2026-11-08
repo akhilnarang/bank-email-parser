@@ -145,6 +145,8 @@ class IdfcCcCreditAlertParser(BaseEmailParser):
     Matches:
       'Payment of Rs. 1,234.56 was received on your FIRST Wealth Credit Card
        ending with XX1234 on 15 May 2099.'
+      'Payment of Rs.1234.56 was credited towards your IDFC FIRST Bank Credit
+       Card ending XX1234 on 15-05-2099.'
     """
 
     bank = "idfc"
@@ -155,10 +157,11 @@ class IdfcCcCreditAlertParser(BaseEmailParser):
 
     _pattern = re.compile(
         r"Payment\s+of\s+(?:Rs\.?|INR|₹)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
-        r"was\s+received\s+on\s+your\s+"
+        r"was\s+(?:received\s+on|credited\s+towards)\s+your\s+"
         r"(?:IDFC\s+FIRST\s+BANK\s+|FIRST\s+\w+\s+)?Credit\s+Card\s+"
-        r"ending\s+with\s+(?P<card>\S+)\s+"
-        r"on\s+(?P<date>\d{1,2}\s+\w+\s+\d{4})\.",
+        r"ending\s+(?:with\s+)?(?P<card>\S+)\s+"
+        r"on\s+(?P<date>\d{1,2}\s+\w+\s+\d{4}|\d{2}-\d{2}-\d{4})\.",
+        re.IGNORECASE,
     )
 
     def parse(self, html: str) -> ParsedEmail:

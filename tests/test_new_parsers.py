@@ -373,6 +373,21 @@ class TestIdfcCcCreditAlertParser:
         assert result.transaction.transaction_date.month == 5
         assert result.transaction.transaction_date.day == 15
 
+    def test_parses_standing_instruction_payment(self):
+        text = (
+            "Dear Customer, Payment of Rs.1234.56 was credited towards your "
+            "IDFC FIRST Bank Credit Card ending XX1234 on 15-05-2099. "
+            "Always You First, Team Credit Card"
+        )
+        result = parse_email("idfc", text)
+
+        assert result.email_type == "idfc_cc_credit_alert"
+        assert result.transaction is not None
+        assert result.transaction.direction == "credit"
+        assert result.transaction.amount.amount == Decimal("1234.56")
+        assert result.transaction.card_mask == "XX1234"
+        assert result.transaction.transaction_date == date(2099, 5, 15)
+
 
 class TestEquitasCcStatementParser:
     """Test Equitas credit card statement email parsing."""
