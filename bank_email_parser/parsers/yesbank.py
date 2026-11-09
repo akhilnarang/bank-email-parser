@@ -21,8 +21,9 @@ from bank_email_parser.parsing import (
 )
 
 _CHEQUE_NARRATION_RE = re.compile(r"^CHQ\b", re.IGNORECASE)
-_RTGS_NARRATION_RE = re.compile(
-    r"^RTGS:(?P<ref>[A-Z0-9]{8,})/(?P<name>.+)$", re.IGNORECASE
+_TRANSFER_NARRATION_RE = re.compile(
+    r"^(?P<rail>RTGS|NEFT):(?P<ref>[A-Z0-9]{8,})/(?:From:)?(?P<name>.+)$",
+    re.IGNORECASE,
 )
 _HONORIFIC_RE = re.compile(r"^(?:Mr|Mrs|Ms|Miss|Dr|M/s)\.?\s+", re.IGNORECASE)
 
@@ -44,10 +45,12 @@ def _split_narration(narration: str) -> _NarrationFields:
     Returns:
         The counterparty, channel and reference of the narration.
     """
-    if match := _RTGS_NARRATION_RE.match(narration):
+    if match := _TRANSFER_NARRATION_RE.match(narration):
         name = _HONORIFIC_RE.sub("", match.group("name")).strip()
         return _NarrationFields(
-            counterparty=name, channel="rtgs", reference=match.group("ref")
+            counterparty=name or None,
+            channel=match.group("rail").lower(),
+            reference=match.group("ref"),
         )
     if _CHEQUE_NARRATION_RE.search(narration):
         return _NarrationFields(
