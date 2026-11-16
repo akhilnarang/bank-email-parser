@@ -3475,7 +3475,7 @@ class TestSliceDebitedAlert:
     HTML = """
     <html><body><table>
       <tr><td>Hi Customer,</td></tr>
-      <tr><td> ₹100 debited from your slice bank account xx0000 via UPI. </td></tr>
+      <tr><td> ₹100 debited from your slice {kind}account xx0000 via UPI. </td></tr>
       <tr><td><table>
         <tr><td>Transaction date</td><td>30-Sep-26</td></tr>
         <tr><td>To</td><td>Sample Merchant</td></tr>
@@ -3484,8 +3484,9 @@ class TestSliceDebitedAlert:
     </table></body></html>
     """
 
-    def test_parses_debit(self):
-        result = parse_email("slice", self.HTML)
+    @pytest.mark.parametrize("kind", ["bank ", ""])
+    def test_parses_debit(self, kind):
+        result = parse_email("slice", self.HTML.replace("{kind}", kind))
 
         assert result.email_type == "slice_transaction_alert"
         assert result.transaction is not None

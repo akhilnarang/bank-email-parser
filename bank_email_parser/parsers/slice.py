@@ -58,6 +58,7 @@ class SliceTransactionAlertParser(BaseEmailParser):
       'You have received ₹X via UPI in your slice bank account/a/c XXXX'
       'You have sent ₹X via UPI from your slice bank account/a/c XXXX'
       '₹X debited from your slice bank account XXXX via UPI.'
+      '₹X debited from your slice account XXXX via UPI.'
     """
 
     bank = "slice"
@@ -72,7 +73,7 @@ class SliceTransactionAlertParser(BaseEmailParser):
     )
     _debited_pattern = re.compile(
         rf"₹\s*(?P<amount>{_AMT})\s+(?P<direction>debited)\s+"
-        rf"from\s+your\s+slice\s+(?:bank|savings)\s+{_ACCT}\s+"
+        rf"from\s+your\s+slice\s+(?:(?:bank|savings)\s+)?{_ACCT}\s+"
         r"via\s+(?P<channel>[A-Za-z]+)"
     )
 
