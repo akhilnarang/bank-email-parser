@@ -2089,20 +2089,27 @@ class TestYesbankAccountCreditAlertParser:
         with pytest.raises(ParseError):
             parse_email("yesbank", missing_ref_html)
 
-    def test_neft_credit_splits_narration(self):
-        html = """
+    @pytest.mark.parametrize(
+        ("narration", "channel", "reference"),
+        [
+            ("NEFT:SAMP0000000000/From:Mr. JANE DOE.", "neft", "SAMP0000000000"),
+            ("IMPS:600000000000/Mr JANE DOE.", "imps", "600000000000"),
+        ],
+    )
+    def test_transfer_credit_splits_narration(self, narration, channel, reference):
+        html = f"""
         <html><body>
         <p>An amount of INR 12,345.00 has been credited to your A/C. No. XX0000
         on 01-JAN-2026 10:20:30 on account of
-        NEFT:SAMP0000000000/From:Mr. JANE DOE.</p>
+        {narration}</p>
         </body></html>
         """
         result = parse_email("yesbank", html)
         assert result.transaction is not None
         assert result.email_type == "yesbank_account_credit_alert"
         assert result.transaction.counterparty == "JANE DOE"
-        assert result.transaction.channel == "neft"
-        assert result.transaction.reference_number == "SAMP0000000000"
+        assert result.transaction.channel == channel
+        assert result.transaction.reference_number == reference
 
     RTGS_DEBIT_HTML = """
     <html><body>

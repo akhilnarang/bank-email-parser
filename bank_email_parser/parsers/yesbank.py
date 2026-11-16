@@ -22,7 +22,7 @@ from bank_email_parser.parsing import (
 
 _CHEQUE_NARRATION_RE = re.compile(r"^CHQ\b", re.IGNORECASE)
 _TRANSFER_NARRATION_RE = re.compile(
-    r"^(?P<rail>RTGS|NEFT):(?P<ref>[A-Z0-9]{8,})/(?:From:)?(?P<name>.+)$",
+    r"^(?P<rail>RTGS|NEFT|IMPS):(?P<ref>[A-Z0-9]{8,})/(?:From:)?(?P<name>.+)$",
     re.IGNORECASE,
 )
 _HONORIFIC_RE = re.compile(r"^(?:Mr|Mrs|Ms|Miss|Dr|M/s)\.?\s+", re.IGNORECASE)
