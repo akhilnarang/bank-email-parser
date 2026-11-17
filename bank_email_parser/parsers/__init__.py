@@ -1,5 +1,6 @@
 """Explicit bank parser registry."""
 
+from bank_email_parser.parsers.au import AuParser
 from bank_email_parser.parsers.axis import AxisParser
 from bank_email_parser.parsers.base import BankParser
 from bank_email_parser.parsers.bob import BobParser
@@ -21,6 +22,7 @@ from bank_email_parser.parsers.yesbank import YesbankParser
 
 PARSERS: frozendict[str, type[BankParser]] = frozendict(
     {
+        "au": AuParser,
         "axis": AxisParser,
         "bob": BobParser,
         "bom": BomParser,
