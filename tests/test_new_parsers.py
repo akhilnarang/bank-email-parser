@@ -2042,7 +2042,7 @@ class TestYesbankAccountCreditAlertParser:
         assert debit.transaction.transaction_time == time(10, 20, 30)
         assert debit.transaction.channel == "rtgs"
         assert debit.transaction.reference_number == "YESBR9999010100000000"
-        assert debit.transaction.counterparty == "JANE DOE"
+        assert debit.transaction.counterparty == "Mr JANE DOE"
         assert debit.transaction.balance is not None
         assert debit.transaction.balance.amount == Decimal("23456.78")
 
@@ -2090,13 +2090,20 @@ class TestYesbankAccountCreditAlertParser:
             parse_email("yesbank", missing_ref_html)
 
     @pytest.mark.parametrize(
-        ("narration", "channel", "reference"),
+        ("narration", "channel", "reference", "name"),
         [
-            ("NEFT:SAMP0000000000/From:Mr. JANE DOE.", "neft", "SAMP0000000000"),
-            ("IMPS:600000000000/Mr JANE DOE.", "imps", "600000000000"),
+            (
+                "NEFT:SAMP0000000000/From:Mr. JANE DOE.",
+                "neft",
+                "SAMP0000000000",
+                "Mr. JANE DOE",
+            ),
+            ("IMPS:600000000000/Mr JANE DOE.", "imps", "600000000000", "Mr JANE DOE"),
         ],
     )
-    def test_transfer_credit_splits_narration(self, narration, channel, reference):
+    def test_transfer_credit_splits_narration(
+        self, narration, channel, reference, name
+    ):
         html = f"""
         <html><body>
         <p>An amount of INR 12,345.00 has been credited to your A/C. No. XX0000
@@ -2107,7 +2114,7 @@ class TestYesbankAccountCreditAlertParser:
         result = parse_email("yesbank", html)
         assert result.transaction is not None
         assert result.email_type == "yesbank_account_credit_alert"
-        assert result.transaction.counterparty == "JANE DOE"
+        assert result.transaction.counterparty == name
         assert result.transaction.channel == channel
         assert result.transaction.reference_number == reference
 
