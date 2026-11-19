@@ -2,8 +2,8 @@
 
 Supported email types:
 - slice_transaction_alert: UPI/IMPS/NEFT credit or debit alert ('received/sent via' pattern)
-- slice_transfer_alert: IMPS/RTGS/NEFT debit alert ('transaction of ₹X from' pattern); skips 'initiated' emails
-- slice_cc_transaction_alert: Slice credit card purchase alert, incl. international (forex) spends
+- slice_transfer_alert: IMPS/RTGS/NEFT or unlabelled debit alert ('transaction of ₹X from' pattern); skips 'initiated' emails
+- slice_cc_transaction_alert: Slice credit card purchase alert, incl. international (forex) and UPI spends
 - slice_cc_payment_alert: Slice credit card bill repayment received
 - slice_cc_statement: Slice credit card monthly statement announcement
 - slice_account_statement: Slice savings account statement (password-protected PDF)
@@ -11,6 +11,8 @@ Supported email types:
 
 import re
 from decimal import Decimal, InvalidOperation
+
+from bs4 import BeautifulSoup
 
 from bank_email_parser.exceptions import ParseError
 from bank_email_parser.models import Money, ParsedEmail, TransactionAlert
@@ -22,7 +24,7 @@ from bank_email_parser.utils import (
 
 # Amount pattern that handles zero-width non-joiner (\u200c) between digit groups
 _AMT = r"[\d,\u200c]+(?:\.\d+)?"
-# Account reference: "account xx0298", "a/c xx0298", "account ending XX0298"
+# Account reference: "account xx1234", "a/c xx1234", "account ending XX1234"
 _ACCT = r"(?:a/c|account(?:\s+ending)?)\s+(?P<account>[\w\-*]+)"
 
 # All table keys we care about across Slice email types
@@ -39,6 +41,7 @@ _EXPECTED_TABLE_KEYS = frozenset(
         "rrn",
         "imps ref no",
         "rtgs ref no",
+        "ref no",
     }
 )
 
@@ -136,13 +139,16 @@ class SliceTransferAlertParser(BaseEmailParser):
     Matches:
       'IMPS transaction of ₹X from your slice bank a/c XXXX is successful!'
       'Your RTGS transaction of ₹X from your slice bank account ending XXXX has been completed successfully.'
+      'Transaction of ₹X from your slice bank a/c XXXX is successful!'
+
+    The last form names no channel, so ``channel`` is ``None``.
     """
 
     bank = "slice"
     email_type = "slice_transfer_alert"
 
     _body_pattern = re.compile(
-        r"(?:Your\s+)?(?P<channel>IMPS|RTGS|NEFT)\s+transaction\s+of\s+"
+        r"(?:Your\s+)?(?:(?P<channel>IMPS|RTGS|NEFT)\s+)?transaction\s+of\s+"
         rf"₹\s*(?P<amount>{_AMT})\s+"
         rf"from\s+your\s+slice\s+(?:bank|savings)\s+{_ACCT}",
         re.IGNORECASE,
@@ -158,12 +164,21 @@ class SliceTransferAlertParser(BaseEmailParser):
         r"(?:is\s+successful|has\s+been\s+completed|successfully)",
         re.IGNORECASE,
     )
+    # An alert without a channel must state success after the mask. A
+    # failed transfer uses the same opening words.
+    _unlabelled_success_pattern = re.compile(r"\s+is\s+successful", re.IGNORECASE)
 
     def parse(self, html: str) -> ParsedEmail:
         soup, text = self.prepare_html(html)
 
         if not (match := self._body_pattern.search(text)):
             raise ParseError("Could not parse slice transfer alert body.")
+        if match.group("channel") is None and not (
+            self._unlabelled_success_pattern.match(text, match.end())
+        ):
+            raise ParseError(
+                "Slice transfer alert without a channel is not successful."
+            )
 
         # Skip "initiated" emails to avoid duplicates -- the corresponding
         # "successful"/"completed" email will be parsed instead.
@@ -175,7 +190,7 @@ class SliceTransferAlertParser(BaseEmailParser):
             )
 
         amount = _clean_amount(match.group("amount"))
-        channel = match.group("channel").lower()
+        channel = (match.group("channel") or "").lower() or None
 
         table_data = extract_table_pairs(soup, expected_keys=_EXPECTED_TABLE_KEYS)
 
@@ -187,6 +202,7 @@ class SliceTransferAlertParser(BaseEmailParser):
         reference_number = (
             table_data.get("imps ref no")
             or table_data.get("rtgs ref no")
+            or table_data.get("ref no")
             or table_data.get("rrn")
         )
 
@@ -212,6 +228,7 @@ class SliceCcTransactionAlertParser(BaseEmailParser):
     Matches:
       'Transaction of ₹X at MERCHANT from your slice credit card xxNNNN was successful.'
       'Transaction of USD Y | ₹X at MERCHANT from your slice credit card xxNNNN was successful.'
+      '₹X spent on your slice credit card xxNNNN via UPI.' with a date/To/RRN table
 
     The settled ₹ figure is the transaction amount. On a foreign-currency
     spend the original currency has no model field, so it is preserved only in
@@ -236,10 +253,17 @@ class SliceCcTransactionAlertParser(BaseEmailParser):
         r"was\s+successful",
         re.IGNORECASE,
     )
+    _upi_pattern = re.compile(
+        rf"₹\s*(?P<amount>{_AMT})\s+spent\s+on\s+your\s+slice\s+credit\s+card\s+"
+        r"(?P<card>[\w\-*]+)\s+via\s+UPI\b",
+        re.IGNORECASE,
+    )
 
     def parse(self, html: str) -> ParsedEmail:
-        _, text = self.prepare_html(html)
+        soup, text = self.prepare_html(html)
 
+        if match := self._upi_pattern.search(text):
+            return self._parse_upi_spend(soup, match)
         if not (match := self._body_pattern.search(text)):
             raise ParseError("Could not parse slice credit card transaction alert.")
 
@@ -250,6 +274,29 @@ class SliceCcTransactionAlertParser(BaseEmailParser):
                 direction="debit",
                 amount=Money(amount=_clean_amount(match.group("amount"))),
                 counterparty=match.group("merchant").strip(),
+                card_mask=match.group("card"),
+                channel="card",
+                raw_description=match.group(0).strip(),
+            ),
+        )
+
+    def _parse_upi_spend(
+        self, soup: BeautifulSoup, match: re.Match[str]
+    ) -> ParsedEmail:
+        table_data = extract_table_pairs(soup, expected_keys=_EXPECTED_TABLE_KEYS)
+        transaction_date = None
+        if date_str := table_data.get("transaction date"):
+            transaction_date = parse_date(date_str)
+
+        return ParsedEmail(
+            email_type=self.email_type,
+            bank=self.bank,
+            transaction=TransactionAlert(
+                direction="debit",
+                amount=Money(amount=_clean_amount(match.group("amount"))),
+                transaction_date=transaction_date,
+                counterparty=table_data.get("to"),
+                reference_number=table_data.get("rrn"),
                 card_mask=match.group("card"),
                 channel="card",
                 raw_description=match.group(0).strip(),
