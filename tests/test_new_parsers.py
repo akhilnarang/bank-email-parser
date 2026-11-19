@@ -2869,6 +2869,62 @@ class TestSliceCcTransactionAlertParser:
         with pytest.raises(ParseError):
             parse_email("slice", html)
 
+    def test_parses_upi_spend(self):
+        html = """
+        <html><body><table>
+          <tr><td>Hi SAMPLE,</td></tr>
+          <tr><td>₹250 spent on your slice credit card xx1234 via UPI.</td></tr>
+          <tr><td><table>
+            <tr><td>Transaction date</td><td>05-Oct-26</td></tr>
+            <tr><td>To</td><td>Sample Mart</td></tr>
+            <tr><td>RRN</td><td>000011112222</td></tr>
+          </table></td></tr>
+        </table></body></html>
+        """
+        result = parse_email("slice", html)
+        assert result.email_type == "slice_cc_transaction_alert"
+        assert result.transaction is not None
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("250")
+        assert result.transaction.card_mask == "xx1234"
+        assert result.transaction.account_mask is None
+        assert result.transaction.counterparty == "Sample Mart"
+        assert result.transaction.reference_number == "000011112222"
+        assert result.transaction.transaction_date == date(2026, 10, 5)
+        assert result.transaction.channel == "card"
+
+
+class TestSliceTransferAlertWithoutChannel:
+    HTML = """
+    <html><body><table>
+      <tr><td>Hi SAMPLE,</td></tr>
+      <tr><td> Transaction of ₹75 from your slice bank a/c xx0000 {status} </td></tr>
+      <tr><td><table>
+        <tr><td>Transaction Date</td><td>06-Oct-26</td></tr>
+        <tr><td>Beneficiary Name</td><td>Sample Payee</td></tr>
+        <tr><td>Beneficiary Acc No.</td><td>xx9999</td></tr>
+        <tr><td>Beneficiary Bank</td><td>Sample Bank</td></tr>
+        <tr><td>Ref No.</td><td>000033334444</td></tr>
+      </table></td></tr>
+    </table></body></html>
+    """
+
+    def test_parses_successful_debit(self):
+        result = parse_email("slice", self.HTML.replace("{status}", "is successful!"))
+        assert result.email_type == "slice_transfer_alert"
+        assert result.transaction is not None
+        assert result.transaction.direction == "debit"
+        assert result.transaction.amount.amount == Decimal("75")
+        assert result.transaction.account_mask == "xx0000"
+        assert result.transaction.counterparty == "Sample Payee"
+        assert result.transaction.reference_number == "000033334444"
+        assert result.transaction.transaction_date == date(2026, 10, 6)
+        assert result.transaction.channel is None
+
+    def test_rejects_failed_debit(self):
+        with pytest.raises(ParseError):
+            parse_email("slice", self.HTML.replace("{status}", "has failed."))
+
 
 class TestKotakUpiCreditParser:
     """Kotak811 UPI incoming credit alert.
