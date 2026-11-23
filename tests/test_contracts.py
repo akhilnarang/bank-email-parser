@@ -296,3 +296,20 @@ def test_a_subclass_cannot_escape_the_time_source_check() -> None:
 
         class _Child(_Parent):
             event_time_source = "arrival"
+
+
+def test_indusind_account_alert_splits_neft_credit() -> None:
+    html = """
+    <html><body><p>Your IndusInd Bank Account No. <b>10XXXXXX1234</b> has been
+    <b>Credited</b> for INR <b>1,000.00</b> towards
+    <b>N/SBIN0000N1234567/SBIN0001234/Mr. Sample/Persn</b>.
+    The balance available in your Account is INR <b>2,000.00.</b></p></body></html>
+    """
+
+    txn = parse_email("indusind", html).transaction
+
+    assert txn is not None
+    assert txn.direction == "credit"
+    assert txn.channel == "neft"
+    assert txn.reference_number == "SBIN0000N1234567"
+    assert txn.counterparty == "Mr. Sample/Persn"
