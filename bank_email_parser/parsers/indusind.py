@@ -281,7 +281,14 @@ class IndusindAccountAlertParser(BaseEmailParser):
 
         reference_number = None
         counterparty = None
-        if channel == "upi":
+        if channel == "n":
+            # N/<UTR>/<IFSC>/<name>: NEFT. The bank cuts the name short.
+            channel = "neft"
+            parts = [p.strip() for p in description.split("/", 3)]
+            if len(parts) >= 2 and parts[1]:
+                reference_number = parts[1]
+            counterparty = parts[3] if len(parts) >= 4 and parts[3] else None
+        elif channel == "upi":
             # UPI/<ref>/<DR|CR>/<name-prefix>/<bank>/<vpa>[/<extra>]
             # The 4th segment is the first 4 chars of the payee name. The bank
             # keeps only the last 15 chars of the VPA in segment 6. The email
