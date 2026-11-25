@@ -244,16 +244,20 @@ class IndusindAccountAlertParser(BaseEmailParser):
 
     Matches: 'Your IndusInd Bank Account No. 10XXXXXX1234 has been Credited
     for INR 1,000.00 towards UPI/123456789012/...'
+
+    A shorter layout drops "Bank" and "No." and gives no balance:
+    'Your IndusInd Account XXXXXXXX1234 has been credited for INR 1000.00
+    towards N/<UTR>/<IFSC>/<name>. Call 18602677777 to report issue'
     """
 
     bank = "indusind"
     email_type = "indusind_account_alert"
 
     _pattern = re.compile(
-        r"IndusInd\s+Bank\s+Account\s+No\.\s*(?P<account>[\dX]+)\s+"
+        r"IndusInd\s+(?:Bank\s+)?Account\s+(?:No\.\s*)?(?P<account>[\dX]+)\s+"
         r"has\s+been\s+(?P<direction>Credited|Debited)\s+"
         r"for\s+(?:INR|Rs\.?|₹)\s*(?P<amount>[\d,]+(?:\.\d+)?)\s+"
-        r"towards\s+(?P<description>.+?)\.\s*(?:The\s+balance|$)",
+        r"towards\s+(?P<description>.+?)\.\s*(?:The\s+balance|Call\s|$)",
         re.IGNORECASE,
     )
 
