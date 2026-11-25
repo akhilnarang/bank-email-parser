@@ -313,3 +313,24 @@ def test_indusind_account_alert_splits_neft_credit() -> None:
     assert txn.channel == "neft"
     assert txn.reference_number == "SBIN0000N1234567"
     assert txn.counterparty == "Mr. Sample/Persn"
+
+
+def test_indusind_account_alert_parses_short_layout() -> None:
+    """The short layout has no "Bank", no "No." and no balance. A call-us
+    line follows the narration."""
+    html = """
+    <html><body><p>Dear Customer, Your IndusInd Account XXXXXXXX1234 has been
+    credited for INR 1000.00 towards N/SAMP000000000000/SAMP0000001/Sample Payer.
+    Call 18602677777 to report issue-IndusInd Bank</p></body></html>
+    """
+
+    txn = parse_email("indusind", html).transaction
+
+    assert txn is not None
+    assert txn.direction == "credit"
+    assert txn.amount.amount == Decimal("1000.00")
+    assert txn.account_mask == "XXXXXXXX1234"
+    assert txn.channel == "neft"
+    assert txn.reference_number == "SAMP000000000000"
+    assert txn.counterparty == "Sample Payer"
+    assert txn.balance is None
